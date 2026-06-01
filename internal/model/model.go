@@ -9,7 +9,8 @@ const AppName = "SFS"
 const AppFullName = "SFS — SmallFileSync"
 
 // AppVersion is the current application version.
-const AppVersion = "0.1.0"
+// Declared as var so it can be overridden via -ldflags at build time.
+var AppVersion = "0.1.0"
 
 // FileRecord represents a synced file entry (compatible with legacy uTools plugin).
 type FileRecord struct {
@@ -74,13 +75,13 @@ type WebDAVConfig struct {
 
 // StorageConfig holds the storage backend configuration.
 type StorageConfig struct {
-	Type   string      `json:"type"`
+	Type   string       `json:"type"`
 	WebDAV WebDAVConfig `json:"webdav"`
 }
 
 // AppSettings holds all application settings.
 type AppSettings struct {
-	Language string         `json:"language,omitempty"`
+	Language string        `json:"language,omitempty"`
 	AutoSync bool          `json:"autoSync"`
 	Storage  StorageConfig `json:"storage"`
 }

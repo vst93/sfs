@@ -32,25 +32,25 @@ const (
 
 // App is the main Bubble Tea model.
 type App struct {
-	state        viewState
-	width        int
-	height       int
-	quitting     bool
+	state    viewState
+	width    int
+	height   int
+	quitting bool
 
 	// Data
-	fileList        []model.FileRecord
-	localDirMap     map[string]string
-	localStateMap   map[string]model.FileState
-	settings        model.AppSettings
-	uid             string
-	lastSyncResult  *model.SyncResult
+	fileList       []model.FileRecord
+	localDirMap    map[string]string
+	localStateMap  map[string]model.FileState
+	settings       model.AppSettings
+	uid            string
+	lastSyncResult *model.SyncResult
 
 	// Storage
 	localStore  *storage.LocalStore
 	webdavStore *storage.WebDAVStore
 
 	// File list cursor
-	cursor int
+	cursor     int
 	pageOffset int // first visible row index
 	pageRows   int // how many rows fit on screen
 
@@ -70,9 +70,9 @@ type App struct {
 	showPassword     bool
 
 	// Sync state
-	syncing     bool
-	syncProgress string
-	autoSync    bool
+	syncing       bool
+	syncProgress  string
+	autoSync      bool
 	autoCountdown int
 
 	// Confirm dialog
@@ -156,17 +156,17 @@ func NewApp() (*App, error) {
 	}
 
 	app := &App{
-		state:         viewFileList,
-		localStore:    localStore,
-		webdavStore:   webdavStore,
-		settings:      settings,
-		uid:           uid,
-		localDirMap:   dirMap,
-		localStateMap: stateMap,
-		autoSync:      settings.AutoSync,
-		autoCountdown: 60,
-		pageRows:      10,
-		addFileInputs: make([]textinput.Model, 2),
+		state:          viewFileList,
+		localStore:     localStore,
+		webdavStore:    webdavStore,
+		settings:       settings,
+		uid:            uid,
+		localDirMap:    dirMap,
+		localStateMap:  stateMap,
+		autoSync:       settings.AutoSync,
+		autoCountdown:  60,
+		pageRows:       10,
+		addFileInputs:  make([]textinput.Model, 2),
 		settingsInputs: make([]textinput.Model, 4),
 	}
 

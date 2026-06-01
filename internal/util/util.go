@@ -76,4 +76,3 @@ func CalculateFileMD5FromBytes(data []byte) (string, error) {
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-

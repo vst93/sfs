@@ -78,6 +78,8 @@ SFS (SmallFileSync) 是一款基于 WebDAV 的终端文件同步工具，使用 
 go install github.com/vst93/sfs@latest
 ```
 
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg?logo=go)](https://golang.org)
+
 Requires **Go 1.21+**
 
 需要 **Go 1.21+**
