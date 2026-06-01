@@ -105,7 +105,7 @@ func (s *WebDAVStore) ensureParentCollections(targetURL string) error {
 	return nil
 }
 
-// GetFileList reads the remote fileList.
+// GetFileList reads the remote fileList and migrates legacy records.
 func (s *WebDAVStore) GetFileList() ([]model.FileRecord, error) {
 	url := s.buildURL("fileList")
 	resp, err := s.doRequest("GET", url, nil, "")
@@ -122,6 +122,10 @@ func (s *WebDAVStore) GetFileList() ([]model.FileRecord, error) {
 	var list []model.FileRecord
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		return nil, fmt.Errorf("failed to decode fileList: %w", err)
+	}
+	// Migrate legacy records that have FileIds but no FileID
+	for i := range list {
+		list[i].MigrateFromLegacy()
 	}
 	return list, nil
 }
@@ -147,19 +151,19 @@ func (s *WebDAVStore) SaveFileList(list []model.FileRecord) error {
 	return nil
 }
 
-// GetFile reads a single file from remote (Base64-encoded).
+// GetFile reads a whole file from remote storage.
 func (s *WebDAVStore) GetFile(key string) ([]byte, error) {
 	url := s.buildURL("file_" + key)
 	resp, err := s.doRequest("GET", url, nil, "")
 	if err != nil {
-		return nil, fmt.Errorf("WebDAV read file failed: %w", err)
+		return nil, fmt.Errorf("WebDAV read failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
 		return nil, nil
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("WebDAV read file failed: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("WebDAV read failed: HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -167,12 +171,12 @@ func (s *WebDAVStore) GetFile(key string) ([]byte, error) {
 	}
 	decoded, err := base64.StdEncoding.DecodeString(string(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode file data: %w", err)
+		return nil, fmt.Errorf("failed to decode data: %w", err)
 	}
 	return decoded, nil
 }
 
-// SaveFile writes a single file to remote (Base64-encoded).
+// SaveFile writes a whole file to remote storage.
 func (s *WebDAVStore) SaveFile(key string, data []byte) error {
 	url := s.buildURL("file_" + key)
 	if err := s.ensureParentCollections(url); err != nil {
@@ -181,30 +185,30 @@ func (s *WebDAVStore) SaveFile(key string, data []byte) error {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	resp, err := s.doRequest("PUT", url, strings.NewReader(encoded), "application/octet-stream")
 	if err != nil {
-		return fmt.Errorf("WebDAV write file failed: %w", err)
+		return fmt.Errorf("WebDAV write failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("WebDAV write file failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("WebDAV write failed: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// RemoveFile deletes a single file from remote.
+// RemoveFile deletes a file from remote storage.
 func (s *WebDAVStore) RemoveFile(key string) error {
 	url := s.buildURL("file_" + key)
 	resp, err := s.doRequest("DELETE", url, nil, "")
 	if err != nil {
-		return fmt.Errorf("WebDAV delete file failed: %w", err)
+		return fmt.Errorf("WebDAV delete failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
-		return fmt.Errorf("WebDAV delete file failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("WebDAV delete failed: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// HealthCheck verifies the WebDAV connection.
+// HealthCheck verifies the WebDAV connection using a single probe file.
 func (s *WebDAVStore) HealthCheck() (bool, string) {
 	if strings.TrimSpace(s.config.Endpoint) == "" {
 		return false, i18n.T("webdav.endpoint_required")
@@ -232,8 +236,13 @@ func (s *WebDAVStore) HealthCheck() (bool, string) {
 	return true, i18n.T("webdav.connect_success")
 }
 
-// SaveFileDataToStorage saves a local file to remote storage.
-// Returns the file storage key, or an error.
+// BuildFileDataStorageKey builds the storage key for file data.
+func BuildFileDataStorageKey(id string) string {
+	return "file_" + id
+}
+
+// SaveFileDataToStorage reads a local file and uploads it as a single WebDAV object.
+// Returns the storage key ("file_<id>") on success.
 func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -249,7 +258,7 @@ func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (stri
 	return fileKey, nil
 }
 
-// SaveFileDataToLocal downloads a file from remote storage to a local path.
+// SaveFileDataToLocal downloads a whole file from remote storage and writes it to a local path.
 func SaveFileDataToLocal(store *WebDAVStore, localPath string, fileKey string) error {
 	data, err := store.GetFile(fileKey)
 	if err != nil {
@@ -268,7 +277,7 @@ func SaveFileDataToLocal(store *WebDAVStore, localPath string, fileKey string) e
 	return nil
 }
 
-// HasStoredFileData checks if a file exists on remote.
+// HasStoredFileData checks if the file exists on remote storage.
 func HasStoredFileData(store *WebDAVStore, fileKey string) bool {
 	data, err := store.GetFile(fileKey)
 	return err == nil && data != nil
@@ -285,9 +294,4 @@ func VerifyStoredFileData(store *WebDAVStore, fileKey string, expectedMD5 string
 		return false, i18n.T("webdav.readback_verify")
 	}
 	return true, ""
-}
-
-// DeleteStoredFileData deletes a file from remote storage.
-func DeleteStoredFileData(store *WebDAVStore, fileKey string) error {
-	return store.RemoveFile(fileKey)
 }

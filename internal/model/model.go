@@ -13,16 +13,42 @@ const AppVersion = "0.1.0"
 
 // FileRecord represents a synced file entry (compatible with legacy uTools plugin).
 type FileRecord struct {
-	ID              string  `json:"id"`
-	FileName        string  `json:"fileName"`
-	Note            string  `json:"note"`
-	FileMD5         string  `json:"fileMd5"`
-	LastChangeTime  int64   `json:"lastChangeTime"`
-	LastUploadTime  int64   `json:"lastUploadTime"`
-	LastUploadUser  string  `json:"lastUploadUser"`
-	Size            float64 `json:"size"` // KB
-	FileID          string  `json:"fileId"`
-	LocalDirPending bool    `json:"localDirPending,omitempty"`
+	ID              string   `json:"id"`
+	FileName        string   `json:"fileName"`
+	Note            string   `json:"note"`
+	FileMD5         string   `json:"fileMd5"`
+	LastChangeTime  int64    `json:"lastChangeTime"`
+	LastUploadTime  int64    `json:"lastUploadTime"`
+	LastUploadUser  string   `json:"lastUploadUser"`
+	Size            float64  `json:"size"` // KB
+	FileID          string   `json:"fileId,omitempty"`
+	FileIds         []string `json:"fileIds,omitempty"`
+	LocalDirPending bool     `json:"localDirPending,omitempty"`
+}
+
+// StorageKey returns the single WebDAV object key for this file's data.
+func (r FileRecord) StorageKey() string {
+	if r.FileID != "" {
+		return r.FileID
+	}
+	if len(r.FileIds) > 0 {
+		return "file_" + r.FileIds[0]
+	}
+	return "file_" + r.ID
+}
+
+// MigrateFromLegacy converts old chunked FileIds to the new single FileID.
+// Should be called after deserializing old JSON data.
+func (r *FileRecord) MigrateFromLegacy() {
+	if r.FileID != "" {
+		// Already migrated or new format
+		r.FileIds = nil
+		return
+	}
+	if len(r.FileIds) > 0 {
+		r.FileID = "file_" + r.FileIds[0]
+		r.FileIds = nil
+	}
 }
 
 // NormalizeFileRecord sanitizes a file record (matching legacy behavior).
@@ -36,15 +62,13 @@ func NormalizeFileRecord(r FileRecord) FileRecord {
 	if r.FileMD5 == "" {
 		r.FileMD5 = ""
 	}
-	if r.FileID == "" {
-		r.FileID = ""
-	}
 	// When never uploaded, clear derived fields (matches legacy behavior)
 	if r.LastUploadTime == 0 {
 		r.LastUploadUser = ""
 		r.FileMD5 = ""
 		r.Size = 0
 		r.FileID = ""
+		r.FileIds = nil
 	}
 	return r
 }
