@@ -53,15 +53,6 @@ func (r *FileRecord) MigrateFromLegacy() {
 
 // NormalizeFileRecord sanitizes a file record (matching legacy behavior).
 func NormalizeFileRecord(r FileRecord) FileRecord {
-	if r.Note == "" {
-		r.Note = ""
-	}
-	if r.LastUploadUser == "" {
-		r.LastUploadUser = ""
-	}
-	if r.FileMD5 == "" {
-		r.FileMD5 = ""
-	}
 	// When never uploaded, clear derived fields (matches legacy behavior)
 	if r.LastUploadTime == 0 {
 		r.LastUploadUser = ""

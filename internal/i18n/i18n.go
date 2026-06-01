@@ -62,18 +62,22 @@ func DetectLocale() Locale {
 	for _, env := range []string{"SFS_LANG", "LC_ALL", "LC_MESSAGES", "LANG"} {
 		val := os.Getenv(env)
 		if val != "" {
-			if strings.HasPrefix(strings.ToLower(val), "en") {
+			lower := strings.ToLower(val)
+			if strings.HasPrefix(lower, "en") {
 				return En
 			}
-			return Zh
+			if strings.HasPrefix(lower, "zh") {
+				return Zh
+			}
+			// Unrecognized locale defaults to English
+			return En
 		}
 	}
 	// macOS: try to detect from system defaults
 	if runtime.GOOS == "darwin" {
-		// Default to zh for Chinese macOS users
 		return Zh
 	}
-	return Zh
+	return En
 }
 
 // T returns the translated string for the given key.

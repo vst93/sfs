@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -153,45 +154,94 @@ func (s *WebDAVStore) SaveFileList(list []model.FileRecord) error {
 
 // GetFile reads a whole file from remote storage.
 func (s *WebDAVStore) GetFile(key string) ([]byte, error) {
-	url := s.buildURL("file_" + key)
-	resp, err := s.doRequest("GET", url, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("WebDAV read failed: %w", err)
+	var result []byte
+	err := withRetry(2, func() error {
+		url := s.buildURL("file_" + key)
+		resp, e := s.doRequest("GET", url, nil, "")
+		if e != nil {
+			return fmt.Errorf("WebDAV read failed: %w", e)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			return nil
+		}
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("WebDAV read failed: HTTP %d", resp.StatusCode)
+		}
+		body, e := io.ReadAll(resp.Body)
+		if e != nil {
+			return e
+		}
+		decoded, e := base64.StdEncoding.DecodeString(string(body))
+		if e != nil {
+			return fmt.Errorf("failed to decode data: %w", e)
+		}
+		result = decoded
+		return nil
+	})
+	return result, err
+}
+
+// randString returns a random string of lowercase letters and digits.
+func randString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 {
-		return nil, nil
+	return string(b)
+}
+
+// isRetryableError returns true for network/timeout errors that should be retried.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
 	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("WebDAV read failed: HTTP %d", resp.StatusCode)
+	// Check for context deadline or common network errors
+	if err == context.DeadlineExceeded || err == io.ErrUnexpectedEOF {
+		return true
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	return strings.Contains(err.Error(), "connection") ||
+		strings.Contains(err.Error(), "timeout") ||
+		strings.Contains(err.Error(), "reset by peer")
+}
+
+// withRetry retries fn up to maxRetries times with exponential backoff.
+// Only retries on network/timeout errors, not on HTTP 4xx.
+func withRetry(maxRetries int, fn func() error) error {
+	var err error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * time.Second
+			time.Sleep(backoff)
+		}
+		err = fn()
+		if err == nil || !isRetryableError(err) {
+			return err
+		}
 	}
-	decoded, err := base64.StdEncoding.DecodeString(string(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode data: %w", err)
-	}
-	return decoded, nil
+	return err
 }
 
 // SaveFile writes a whole file to remote storage.
 func (s *WebDAVStore) SaveFile(key string, data []byte) error {
-	url := s.buildURL("file_" + key)
-	if err := s.ensureParentCollections(url); err != nil {
-		return err
-	}
-	encoded := base64.StdEncoding.EncodeToString(data)
-	resp, err := s.doRequest("PUT", url, strings.NewReader(encoded), "application/octet-stream")
-	if err != nil {
-		return fmt.Errorf("WebDAV write failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("WebDAV write failed: HTTP %d", resp.StatusCode)
-	}
-	return nil
+	err := withRetry(2, func() error {
+		url := s.buildURL("file_" + key)
+		if e := s.ensureParentCollections(url); e != nil {
+			return e
+		}
+		encoded := base64.StdEncoding.EncodeToString(data)
+		resp, e := s.doRequest("PUT", url, strings.NewReader(encoded), "application/octet-stream")
+		if e != nil {
+			return fmt.Errorf("WebDAV write failed: %w", e)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("WebDAV write failed: HTTP %d", resp.StatusCode)
+		}
+		return nil
+	})
+	return err
 }
 
 // RemoveFile deletes a file from remote storage.
@@ -216,7 +266,7 @@ func (s *WebDAVStore) HealthCheck() (bool, string) {
 	if s.config.Username == "" {
 		return false, i18n.T("webdav.username_required")
 	}
-	probeKey := "__healthcheck__"
+	probeKey := fmt.Sprintf("__healthcheck_%s__", randString(6))
 	probeValue := fmt.Sprintf("%d", time.Now().UnixNano())
 	url := s.buildURL(probeKey)
 	if err := s.ensureParentCollections(url); err != nil {
@@ -244,25 +294,47 @@ func BuildFileDataStorageKey(id string) string {
 // SaveFileDataToStorage reads a local file and uploads it as a single WebDAV object.
 // Returns the storage key ("file_<id>") on success.
 func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (string, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf(i18n.T("webdav.read_local_failed"), err)
+	var data []byte
+	var err error
+	for attempt := 0; attempt <= 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		data, err = os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf(i18n.T("webdav.read_local_failed"), err)
+		}
+		if len(data) > 10*1024*1024 {
+			return "", fmt.Errorf(i18n.T("webdav.file_too_large"))
+		}
+		fileKey := "file_" + id
+		if err := store.SaveFile(fileKey, data); err != nil {
+			if isRetryableError(err) && attempt < 2 {
+				continue
+			}
+			return "", fmt.Errorf(i18n.T("webdav.write_storage"), err)
+		}
+		return fileKey, nil
 	}
-	if len(data) > 10*1024*1024 {
-		return "", fmt.Errorf(i18n.T("webdav.file_too_large"))
-	}
-	fileKey := "file_" + id
-	if err := store.SaveFile(fileKey, data); err != nil {
-		return "", fmt.Errorf(i18n.T("webdav.write_storage"), err)
-	}
-	return fileKey, nil
+	return "", fmt.Errorf(i18n.T("webdav.write_storage"), err)
 }
 
 // SaveFileDataToLocal downloads a whole file from remote storage and writes it to a local path.
 func SaveFileDataToLocal(store *WebDAVStore, localPath string, fileKey string) error {
-	data, err := store.GetFile(fileKey)
-	if err != nil {
-		return fmt.Errorf(i18n.T("webdav.remote_empty")+": %w", err)
+	var data []byte
+	var err error
+	for attempt := 0; attempt <= 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		data, err = store.GetFile(fileKey)
+		if err != nil {
+			if isRetryableError(err) && attempt < 2 {
+				continue
+			}
+			return fmt.Errorf(i18n.T("webdav.remote_empty")+": %w", err)
+		}
+		break
 	}
 	if data == nil {
 		return fmt.Errorf(i18n.T("webdav.remote_empty"))

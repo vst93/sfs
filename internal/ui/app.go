@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -901,16 +902,49 @@ func (a *App) runSync(fileID, syncType string, isAuto bool) tea.Cmd {
 	}
 }
 
+// findFileIndex returns the index of the file with the given ID, or -1.
+func (a *App) findFileIndex(id string) int {
+	for i, item := range a.fileList {
+		if item.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 func (a *App) doSync(fileID, syncType string, isAuto bool) tea.Msg {
 	a.syncing = true
+
+	// Wrap with a 5-minute timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	result := model.SyncResult{
 		IsAuto:    isAuto,
 		StartedAt: time.Now(),
 	}
 
-	for _, item := range a.fileList {
-		if fileID != "" && item.ID != fileID {
-			continue
+	// For single-file sync, use direct index lookup
+	var items []model.FileRecord
+	if fileID != "" {
+		idx := a.findFileIndex(fileID)
+		if idx >= 0 {
+			items = []model.FileRecord{a.fileList[idx]}
+		}
+	} else {
+		items = a.fileList
+	}
+
+	for _, item := range items {
+		// Check timeout
+		select {
+		case <-ctx.Done():
+			result.Details = append(result.Details, model.SyncDetail{
+				FileName: "...", Action: i18n.T("sync.action.skip"), Status: i18n.T("common.failure"),
+				Reason: "sync timeout (5 minutes exceeded)",
+			})
+			return syncDoneMsg{result: result}
+		default:
 		}
 
 		result.Summary.Checked++
@@ -1064,8 +1098,31 @@ type uploadResult struct {
 }
 
 func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uploadResult {
+	var completed bool
+	var fileKey string
+
+	defer func() {
+		if !completed && fileKey != "" {
+			// Rollback: restore record and remove remote file
+			for i := range a.fileList {
+				if a.fileList[i].ID == item.ID {
+					a.fileList[i].FileID = item.FileID
+					a.fileList[i].FileIds = item.FileIds
+					a.fileList[i].FileMD5 = item.FileMD5
+					a.fileList[i].LastUploadTime = item.LastUploadTime
+					a.fileList[i].LastUploadUser = item.LastUploadUser
+					a.fileList[i].LastChangeTime = item.LastChangeTime
+					a.fileList[i].Size = item.Size
+					break
+				}
+			}
+			_ = a.webdavStore.RemoveFile(fileKey)
+		}
+	}()
+
 	// Upload as a single whole file
-	fileKey, err := storage.SaveFileDataToStorage(a.webdavStore, localPath, item.ID)
+	var err error
+	fileKey, err = storage.SaveFileDataToStorage(a.webdavStore, localPath, item.ID)
 	if err != nil {
 		return uploadResult{false, err.Error()}
 	}
@@ -1073,15 +1130,12 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 	// Verify
 	ok, msg := storage.VerifyStoredFileData(a.webdavStore, fileKey, localMD5)
 	if !ok {
-		// Rollback
-		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, msg}
 	}
 
 	// Re-read local info
 	info, err := os.Stat(localPath)
 	if err != nil {
-		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, i18n.T("sync.reason.upload_read_failed")}
 	}
 	newMD5, _ := util.CalculateFileMD5(localPath)
@@ -1102,25 +1156,12 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 
 	// Save file list
 	if err := a.webdavStore.SaveFileList(a.fileList); err != nil {
-		// Rollback record
-		for i := range a.fileList {
-			if a.fileList[i].ID == item.ID {
-				a.fileList[i].FileID = item.FileID
-				a.fileList[i].FileIds = item.FileIds
-				a.fileList[i].FileMD5 = item.FileMD5
-				a.fileList[i].LastUploadTime = item.LastUploadTime
-				a.fileList[i].LastUploadUser = item.LastUploadUser
-				a.fileList[i].LastChangeTime = item.LastChangeTime
-				a.fileList[i].Size = item.Size
-				break
-			}
-		}
-		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, i18n.T("sync.reason.metadata_failed")}
 	}
 
 	// Update local state
 	a.commitCurrentLocalState(item.ID, localPath)
+	completed = true
 	return uploadResult{true, ""}
 }
 
