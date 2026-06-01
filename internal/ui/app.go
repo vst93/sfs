@@ -926,7 +926,7 @@ func (a *App) doSync(fileID, syncType string, isAuto bool) tea.Msg {
 
 		localPath := a.localPath(item)
 		probe := a.probeLocal(localPath)
-		hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && len(item.FileIds) > 0 && storage.HasStoredFileData(a.webdavStore, item.FileIds)
+		hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && item.FileID != "" && storage.HasStoredFileData(a.webdavStore, item.FileID)
 
 		// Initial upload
 		if state.Key == "initial_upload" {
@@ -961,7 +961,7 @@ func (a *App) doSync(fileID, syncType string, isAuto bool) tea.Msg {
 
 		// Missing local, has remote -> restore
 		if (!probe.ok || probe.md5 == "") && hasRemote {
-			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.FileIds); err != nil {
+			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.FileID); err != nil {
 				result.Summary.Failed++
 				result.Details = append(result.Details, model.SyncDetail{
 					FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
@@ -1008,7 +1008,7 @@ func (a *App) doSync(fileID, syncType string, isAuto bool) tea.Msg {
 			(syncType != "force_upload" && item.LastChangeTime > 0 && probe.mtime > 0 && probe.mtime < item.LastChangeTime)
 
 		if shouldDownload {
-			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.FileIds); err != nil {
+			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.FileID); err != nil {
 				result.Summary.Failed++
 				result.Details = append(result.Details, model.SyncDetail{
 					FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
@@ -1064,28 +1064,24 @@ type uploadResult struct {
 }
 
 func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uploadResult {
-	// Upload chunks
-	fileIds, err := storage.SaveFileDataToStorage(a.webdavStore, localPath, item.ID)
+	// Upload file as a whole
+	fileKey, err := storage.SaveFileDataToStorage(a.webdavStore, localPath, item.ID)
 	if err != nil {
 		return uploadResult{false, err.Error()}
 	}
 
 	// Verify
-	ok, msg := storage.VerifyStoredFileData(a.webdavStore, fileIds, localMD5)
+	ok, msg := storage.VerifyStoredFileData(a.webdavStore, fileKey, localMD5)
 	if !ok {
 		// Rollback
-		for _, id := range fileIds {
-			_ = a.webdavStore.RemoveFileChunk(id)
-		}
+		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, msg}
 	}
 
 	// Re-read local info
 	info, err := os.Stat(localPath)
 	if err != nil {
-		for _, id := range fileIds {
-			_ = a.webdavStore.RemoveFileChunk(id)
-		}
+		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, i18n.T("sync.reason.upload_read_failed")}
 	}
 	newMD5, _ := util.CalculateFileMD5(localPath)
@@ -1093,7 +1089,7 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 	// Update record
 	for i := range a.fileList {
 		if a.fileList[i].ID == item.ID {
-			a.fileList[i].FileIds = fileIds
+			a.fileList[i].FileID = fileKey
 			a.fileList[i].FileMD5 = newMD5
 			a.fileList[i].LastUploadTime = time.Now().UnixMilli()
 			a.fileList[i].LastUploadUser = util.CurrentUsername()
@@ -1108,7 +1104,7 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 		// Rollback record
 		for i := range a.fileList {
 			if a.fileList[i].ID == item.ID {
-				a.fileList[i].FileIds = item.FileIds
+				a.fileList[i].FileID = item.FileID
 				a.fileList[i].FileMD5 = item.FileMD5
 				a.fileList[i].LastUploadTime = item.LastUploadTime
 				a.fileList[i].LastUploadUser = item.LastUploadUser
@@ -1117,9 +1113,7 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 				break
 			}
 		}
-		for _, id := range fileIds {
-			_ = a.webdavStore.RemoveFileChunk(id)
-		}
+		_ = a.webdavStore.RemoveFile(fileKey)
 		return uploadResult{false, i18n.T("sync.reason.metadata_failed")}
 	}
 
@@ -1142,13 +1136,9 @@ func (a *App) doDelete(id string) tea.Msg {
 
 	item := a.fileList[targetIdx]
 
-	// Remove remote chunks
-	targetFileIds := item.FileIds
-	if len(targetFileIds) == 0 {
-		targetFileIds = []string{item.ID}
-	}
-	for _, chunkID := range targetFileIds {
-		_ = a.webdavStore.RemoveFileChunk(chunkID)
+	// Remove remote file
+	if item.FileID != "" {
+		_ = a.webdavStore.RemoveFile(item.FileID)
 	}
 
 	// Remove from list
@@ -1238,7 +1228,7 @@ func (a *App) computeFileState(item model.FileRecord) model.FileStatus {
 	}
 
 	probe := a.probeLocal(a.localPath(item))
-	hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && len(item.FileIds) > 0
+	hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && item.FileID != ""
 
 	if !hasRemote {
 		return model.FileStatus{

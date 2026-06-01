@@ -76,22 +76,3 @@ func CalculateFileMD5FromBytes(data []byte) (string, error) {
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-
-// SplitIntoChunks splits data into base64-encoded chunks of ~700KB.
-func SplitIntoChunks(data []byte, chunkSize int) [][]byte {
-	if chunkSize <= 0 {
-		chunkSize = 700 * 1024
-	}
-	var chunks [][]byte
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-		chunks = append(chunks, data[i:end])
-	}
-	if len(chunks) == 0 {
-		chunks = append(chunks, data)
-	}
-	return chunks
-}

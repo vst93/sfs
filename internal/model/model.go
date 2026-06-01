@@ -13,16 +13,16 @@ const AppVersion = "0.1.0"
 
 // FileRecord represents a synced file entry (compatible with legacy uTools plugin).
 type FileRecord struct {
-	ID              string   `json:"id"`
-	FileName        string   `json:"fileName"`
-	Note            string   `json:"note"`
-	FileMD5         string   `json:"fileMd5"`
-	LastChangeTime  int64    `json:"lastChangeTime"`
-	LastUploadTime  int64    `json:"lastUploadTime"`
-	LastUploadUser  string   `json:"lastUploadUser"`
-	Size            float64  `json:"size"` // KB
-	FileIds         []string `json:"fileIds"`
-	LocalDirPending bool     `json:"localDirPending,omitempty"`
+	ID              string  `json:"id"`
+	FileName        string  `json:"fileName"`
+	Note            string  `json:"note"`
+	FileMD5         string  `json:"fileMd5"`
+	LastChangeTime  int64   `json:"lastChangeTime"`
+	LastUploadTime  int64   `json:"lastUploadTime"`
+	LastUploadUser  string  `json:"lastUploadUser"`
+	Size            float64 `json:"size"` // KB
+	FileID          string  `json:"fileId"`
+	LocalDirPending bool    `json:"localDirPending,omitempty"`
 }
 
 // NormalizeFileRecord sanitizes a file record (matching legacy behavior).
@@ -36,15 +36,15 @@ func NormalizeFileRecord(r FileRecord) FileRecord {
 	if r.FileMD5 == "" {
 		r.FileMD5 = ""
 	}
-	if r.FileIds == nil {
-		r.FileIds = []string{}
+	if r.FileID == "" {
+		r.FileID = ""
 	}
 	// When never uploaded, clear derived fields (matches legacy behavior)
 	if r.LastUploadTime == 0 {
 		r.LastUploadUser = ""
 		r.FileMD5 = ""
 		r.Size = 0
-		r.FileIds = []string{}
+		r.FileID = ""
 	}
 	return r
 }

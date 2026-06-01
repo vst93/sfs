@@ -147,19 +147,19 @@ func (s *WebDAVStore) SaveFileList(list []model.FileRecord) error {
 	return nil
 }
 
-// GetFileChunk reads a single chunk from remote.
-func (s *WebDAVStore) GetFileChunk(key string) ([]byte, error) {
+// GetFile reads a single file from remote (Base64-encoded).
+func (s *WebDAVStore) GetFile(key string) ([]byte, error) {
 	url := s.buildURL("file_" + key)
 	resp, err := s.doRequest("GET", url, nil, "")
 	if err != nil {
-		return nil, fmt.Errorf("WebDAV read chunk failed: %w", err)
+		return nil, fmt.Errorf("WebDAV read file failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
 		return nil, nil
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("WebDAV read chunk failed: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("WebDAV read file failed: HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -167,13 +167,13 @@ func (s *WebDAVStore) GetFileChunk(key string) ([]byte, error) {
 	}
 	decoded, err := base64.StdEncoding.DecodeString(string(body))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode chunk: %w", err)
+		return nil, fmt.Errorf("failed to decode file data: %w", err)
 	}
 	return decoded, nil
 }
 
-// SaveFileChunk writes a single chunk to remote.
-func (s *WebDAVStore) SaveFileChunk(key string, data []byte) error {
+// SaveFile writes a single file to remote (Base64-encoded).
+func (s *WebDAVStore) SaveFile(key string, data []byte) error {
 	url := s.buildURL("file_" + key)
 	if err := s.ensureParentCollections(url); err != nil {
 		return err
@@ -181,25 +181,25 @@ func (s *WebDAVStore) SaveFileChunk(key string, data []byte) error {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	resp, err := s.doRequest("PUT", url, strings.NewReader(encoded), "application/octet-stream")
 	if err != nil {
-		return fmt.Errorf("WebDAV write chunk failed: %w", err)
+		return fmt.Errorf("WebDAV write file failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("WebDAV write chunk failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("WebDAV write file failed: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// RemoveFileChunk deletes a single chunk from remote.
-func (s *WebDAVStore) RemoveFileChunk(key string) error {
+// RemoveFile deletes a single file from remote.
+func (s *WebDAVStore) RemoveFile(key string) error {
 	url := s.buildURL("file_" + key)
 	resp, err := s.doRequest("DELETE", url, nil, "")
 	if err != nil {
-		return fmt.Errorf("WebDAV delete chunk failed: %w", err)
+		return fmt.Errorf("WebDAV delete file failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
-		return fmt.Errorf("WebDAV delete chunk failed: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("WebDAV delete file failed: HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -218,100 +218,76 @@ func (s *WebDAVStore) HealthCheck() (bool, string) {
 	if err := s.ensureParentCollections(url); err != nil {
 		return false, err.Error()
 	}
-	if err := s.SaveFileChunk(probeKey, []byte(probeValue)); err != nil {
+	if err := s.SaveFile(probeKey, []byte(probeValue)); err != nil {
 		return false, err.Error()
 	}
-	got, err := s.GetFileChunk(probeKey)
+	got, err := s.GetFile(probeKey)
 	if err != nil {
 		return false, err.Error()
 	}
-	_ = s.RemoveFileChunk(probeKey)
+	_ = s.RemoveFile(probeKey)
 	if string(got) != probeValue {
 		return false, i18n.T("webdav.verify_failed")
 	}
 	return true, i18n.T("webdav.connect_success")
 }
 
-// BuildFileDataStorageKey builds the storage key for file data.
-func BuildFileDataStorageKey(id string) string {
-	return "file_" + id
-}
-
-// SaveFileDataToStorage saves a local file to remote storage and returns chunk IDs.
-func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) ([]string, error) {
+// SaveFileDataToStorage saves a local file to remote storage.
+// Returns the file storage key, or an error.
+func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (string, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf(i18n.T("webdav.read_local_failed"), err)
+		return "", fmt.Errorf(i18n.T("webdav.read_local_failed"), err)
 	}
 	if len(data) > 10*1024*1024 {
-		return nil, fmt.Errorf(i18n.T("webdav.file_too_large"))
+		return "", fmt.Errorf(i18n.T("webdav.file_too_large"))
 	}
-	chunks := util.SplitIntoChunks(data, 700*1024)
-	var fileIds []string
-	for i, chunk := range chunks {
-		chunkID := id
-		if i > 0 {
-			chunkID = fmt.Sprintf("%s_%d", id, i)
-		}
-		if err := store.SaveFileChunk(chunkID, chunk); err != nil {
-			// Rollback saved chunks
-			for _, savedID := range fileIds {
-				_ = store.RemoveFileChunk(savedID)
-			}
-			return nil, fmt.Errorf(i18n.T("webdav.write_storage"), err)
-		}
-		fileIds = append(fileIds, chunkID)
+	fileKey := "file_" + id
+	if err := store.SaveFile(fileKey, data); err != nil {
+		return "", fmt.Errorf(i18n.T("webdav.write_storage"), err)
 	}
-	return fileIds, nil
+	return fileKey, nil
 }
 
-// SaveFileDataToLocal downloads file data from remote storage to a local path.
-func SaveFileDataToLocal(store *WebDAVStore, localPath string, fileIds []string) error {
-	var allData []byte
-	for _, chunkID := range fileIds {
-		chunk, err := store.GetFileChunk(chunkID)
-		if err != nil {
-			return fmt.Errorf(i18n.T("webdav.remote_empty")+": %w", err)
-		}
-		if chunk == nil {
-			return fmt.Errorf(i18n.T("webdav.remote_empty"))
-		}
-		allData = append(allData, chunk...)
+// SaveFileDataToLocal downloads a file from remote storage to a local path.
+func SaveFileDataToLocal(store *WebDAVStore, localPath string, fileKey string) error {
+	data, err := store.GetFile(fileKey)
+	if err != nil {
+		return fmt.Errorf(i18n.T("webdav.remote_empty")+": %w", err)
+	}
+	if data == nil {
+		return fmt.Errorf(i18n.T("webdav.remote_empty"))
 	}
 	dir := filepath.Dir(localPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf(i18n.T("webdav.create_dir_failed"), err)
 	}
-	if err := os.WriteFile(localPath, allData, 0o644); err != nil {
+	if err := os.WriteFile(localPath, data, 0o644); err != nil {
 		return fmt.Errorf(i18n.T("webdav.write_local"), err)
 	}
 	return nil
 }
 
-// HasStoredFileData checks if all chunks exist on remote.
-func HasStoredFileData(store *WebDAVStore, fileIds []string) bool {
-	for _, chunkID := range fileIds {
-		chunk, err := store.GetFileChunk(chunkID)
-		if err != nil || chunk == nil {
-			return false
-		}
-	}
-	return true
+// HasStoredFileData checks if a file exists on remote.
+func HasStoredFileData(store *WebDAVStore, fileKey string) bool {
+	data, err := store.GetFile(fileKey)
+	return err == nil && data != nil
 }
 
 // VerifyStoredFileData verifies remote data matches expected MD5.
-func VerifyStoredFileData(store *WebDAVStore, fileIds []string, expectedMD5 string) (bool, string) {
-	var allData []byte
-	for _, chunkID := range fileIds {
-		chunk, err := store.GetFileChunk(chunkID)
-		if err != nil || chunk == nil {
-			return false, i18n.T("webdav.readback_empty")
-		}
-		allData = append(allData, chunk...)
+func VerifyStoredFileData(store *WebDAVStore, fileKey string, expectedMD5 string) (bool, string) {
+	data, err := store.GetFile(fileKey)
+	if err != nil || data == nil {
+		return false, i18n.T("webdav.readback_empty")
 	}
-	hash, _ := util.CalculateFileMD5FromBytes(allData)
+	hash, _ := util.CalculateFileMD5FromBytes(data)
 	if expectedMD5 != "" && hash != expectedMD5 {
 		return false, i18n.T("webdav.readback_verify")
 	}
 	return true, ""
+}
+
+// DeleteStoredFileData deletes a file from remote storage.
+func DeleteStoredFileData(store *WebDAVStore, fileKey string) error {
+	return store.RemoveFile(fileKey)
 }
