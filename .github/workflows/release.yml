@@ -62,11 +62,42 @@ jobs:
             zip "${OUTPUT}.zip" "${OUTPUT}"
           fi
 
-      - name: Upload to release
+      - name: Generate SHA256 checksum
+        run: |
+          OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          sha256sum "${OUTPUT}.zip" | awk '{print $1}' > "${OUTPUT}.zip.sha256"
+
+      - name: Upload archive to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: ${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip
           asset_name: ${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip
+          tag: ${{ github.ref }}
+          overwrite: true
+
+      - name: Upload SHA256 to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip.sha256
+          asset_name: ${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip.sha256
+          tag: ${{ github.ref }}
+          overwrite: true
+
+  upload-install-script:
+    name: Upload install.sh
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload install.sh to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: cmd/install.sh
+          asset_name: install.sh
           tag: ${{ github.ref }}
           overwrite: true

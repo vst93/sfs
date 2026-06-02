@@ -95,6 +95,29 @@ SFS is not a replacement for cloud storage (Dropbox, Google Drive, Nutstore/Jian
 
 ## Installation
 
+### Install script (recommended)
+
+```bash
+curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
+```
+
+The script auto-detects your platform, downloads the latest release, and installs the binary.
+
+Options:
+
+```bash
+# Install to a custom directory
+curl -fsSL ... | bash -s -- --install-dir /usr/local/bin
+# Force install (skip checksum errors)
+FORCE_INSTALL=1 curl -fsSL ... | bash
+# Keep the install script after download
+AUTO_DELETE_INSTALL_SCRIPT=0 curl -fsSL ... | bash
+```
+
+Supported platforms: Linux (amd64, arm64), macOS (amd64, arm64)
+
+### go install
+
 ```bash
 go install github.com/vst93/sfs@latest
 ```
@@ -418,6 +441,29 @@ SFS 不是网盘（Dropbox、Google Drive、坚果云）的替代品，它解决
 ---
 
 ## 安装
+
+### 安装脚本（推荐）
+
+```bash
+curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
+```
+
+脚本自动检测平台、下载最新发布版本并安装二进制文件。
+
+可选参数：
+
+```bash
+# 安装到指定目录
+curl -fsSL ... | bash -s -- --install-dir /usr/local/bin
+# 强制安装（跳过校验错误）
+FORCE_INSTALL=1 curl -fsSL ... | bash
+# 下载后保留安装脚本
+AUTO_DELETE_INSTALL_SCRIPT=0 curl -fsSL ... | bash
+```
+
+支持平台：Linux (amd64, arm64)、macOS (amd64, arm64)
+
+### go install
 
 ```bash
 go install github.com/vst93/sfs@latest
