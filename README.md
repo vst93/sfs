@@ -322,8 +322,6 @@ sfs
 
 ### 架构设计
 
-<img src="https://raw.githubusercontent.com/vst93/sfs/main/image.png" alt="SFS Screenshot" width="800" />
-
 ```
 SFS TUI 界面 (Bubble Tea / Lipgloss)
         │
