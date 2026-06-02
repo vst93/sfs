@@ -27,6 +27,8 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
       fail-fast: true
 
     steps:
@@ -46,7 +48,11 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}" .
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}.exe" .
+          else
+            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}" .
+          fi
 
       - name: Create archive
         run: |
