@@ -10,6 +10,8 @@ A WebDAV-based terminal file sync tool
 
 **[English](#english)** · **[中文](#中文)**
 
+<img src="https://raw.githubusercontent.com/vst93/sfs/main/image.png" alt="SFS Screenshot" width="800" />
+
 </div>
 
 ---
@@ -319,6 +321,8 @@ sfs
 | Unbound | 未绑定本地目录 |
 
 ### 架构设计
+
+<img src="https://raw.githubusercontent.com/vst93/sfs/main/image.png" alt="SFS Screenshot" width="800" />
 
 ```
 SFS TUI 界面 (Bubble Tea / Lipgloss)
