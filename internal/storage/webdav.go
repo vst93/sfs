@@ -304,7 +304,7 @@ func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (stri
 		if err != nil {
 			return "", fmt.Errorf(i18n.T("webdav.read_local_failed"), err)
 		}
-		if len(data) > 10*1024*1024 {
+		if len(data) > 200*1024*1024 {
 			return "", fmt.Errorf(i18n.T("webdav.file_too_large"))
 		}
 		fileKey := "file_" + id

@@ -463,7 +463,7 @@ func (a *App) renderAddFile() string {
 	b.WriteString("\n\n")
 	b.WriteString(separator(a.width - 4))
 	b.WriteString("\n")
-	b.WriteString(styleMuted.Render(fmt.Sprintf(i18n.T("add_file.hint"), len(a.fileList))))
+	b.WriteString(styleMuted.Render(i18n.T("add_file.hint")))
 	return b.String()
 }
 

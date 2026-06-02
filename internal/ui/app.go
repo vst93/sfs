@@ -652,7 +652,7 @@ func (a *App) validateAddFilePath() {
 		a.addFileStats = nil
 		return
 	}
-	if info.Size() > 10*1024*1024 {
+	if info.Size() > 200*1024*1024 {
 		a.addFilePath = path
 		a.addFileStats = nil
 		return
@@ -662,11 +662,6 @@ func (a *App) validateAddFilePath() {
 }
 
 func (a *App) submitAddFile(continueAdding bool) (tea.Model, tea.Cmd) {
-	if len(a.fileList) >= 30 {
-		a.addFileFeedback = WarningText.Render(i18n.T("add_file.error.limit"))
-		a.addFileErr = true
-		return a, nil
-	}
 	if a.addFilePath == "" || a.addFileStats == nil {
 		a.addFileFeedback = WarningText.Render(i18n.T("add_file.error.invalid_path"))
 		a.addFileErr = true
@@ -677,7 +672,7 @@ func (a *App) submitAddFile(continueAdding bool) (tea.Model, tea.Cmd) {
 		a.addFileErr = true
 		return a, nil
 	}
-	if a.addFileStats.Size() > 10*1024*1024 {
+	if a.addFileStats.Size() > 200*1024*1024 {
 		a.addFileFeedback = WarningText.Render(i18n.T("add_file.error.too_large"))
 		a.addFileErr = true
 		return a, nil
