@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 env:
   BINARY_PREFIX: sfs
@@ -46,7 +45,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          # Strip leading "v" if present (supports both "v0.2.0" and "0.2.0" tags)
           VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
           OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
@@ -72,73 +70,3 @@ jobs:
           asset_name: ${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip
           tag: ${{ github.ref }}
           overwrite: true
-
-  update_homebrew:
-    name: Update Homebrew formula
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
-        with:
-          repository: vst93/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-tap
-
-      - name: Checkout sfs
-        uses: actions/checkout@v4
-        with:
-          path: sfs
-
-      - name: Download release assets and calculate SHA256
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Use the release tag directly for gh release download
-          TAG="${GITHUB_REF_NAME}"
-          mkdir -p sha256
-
-          for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
-            gh release download "${TAG}" \
-              --repo vst93/sfs \
-              --pattern "sfs-${platform}.zip" \
-              --dir ./sha256
-            cd sha256
-            sha256sum "sfs-${platform}.zip" | awk '{print $1}' > "sfs-${platform}.sha256"
-            cd ..
-          done
-
-          # Export SHA256 values
-          echo "SHA_LINUX_AMD64=$(cat sha256/sfs-linux-amd64.sha256)" >> $GITHUB_ENV
-          echo "SHA_LINUX_ARM64=$(cat sha256/sfs-linux-arm64.sha256)" >> $GITHUB_ENV
-          echo "SHA_DARWIN_AMD64=$(cat sha256/sfs-darwin-amd64.sha256)" >> $GITHUB_ENV
-          echo "SHA_DARWIN_ARM64=$(cat sha256/sfs-darwin-arm64.sha256)" >> $GITHUB_ENV
-
-      - name: Generate formula
-        run: |
-          # Strip leading "v" for version string in formula
-          VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
-
-          sed -e "s/{{VERSION}}/${VERSION}/g" \
-              -e "s/{{SHA256_LINUX_AMD64}}/${{ env.SHA_LINUX_AMD64 }}/g" \
-              -e "s/{{SHA256_LINUX_ARM64}}/${{ env.SHA_LINUX_ARM64 }}/g" \
-              -e "s/{{SHA256_DARWIN_AMD64}}/${{ env.SHA_DARWIN_AMD64 }}/g" \
-              -e "s/{{SHA256_DARWIN_ARM64}}/${{ env.SHA_DARWIN_ARM64 }}/g" \
-              sfs/.github/formula-template.rb > homebrew-tap/Formula/sfs.rb
-
-      - name: Create Pull Request
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
-          cd homebrew-tap
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "sfs-${VERSION}"
-          git add Formula/sfs.rb
-          git commit -m "Update sfs to ${VERSION}"
-          git push origin "sfs-${VERSION}"
-          gh pr create \
-            --title "Update sfs to ${VERSION}" \
-            --body "Automated PR to update sfs formula to version ${VERSION}" \
-            --base main
