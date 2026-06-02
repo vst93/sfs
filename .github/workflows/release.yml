@@ -46,20 +46,19 @@ jobs:
           CGO_ENABLED: 0
         run: |
           VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
-          OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}.exe" .
+            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${{ env.BINARY_PREFIX }}.exe" .
           else
-            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}" .
+            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${{ env.BINARY_PREFIX }}" .
           fi
 
       - name: Create archive
         run: |
-          OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          ZIPNAME="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${OUTPUT}.zip" "${OUTPUT}.exe"
+            zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}.exe"
           else
-            zip "${OUTPUT}.zip" "${OUTPUT}"
+            zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}"
           fi
 
       - name: Generate SHA256 checksum
