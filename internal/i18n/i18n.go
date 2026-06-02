@@ -162,6 +162,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.upload":               "u 上传",
 		"bottom.download":             "d 下载",
 		"bottom.delete":               "x 删除",
+		"bottom.note":                 "n 备注",
 		"bottom.dir":                  "e 目录",
 		"bottom.add":                  "a 添加",
 		"bottom.settings":             "s 设置",
@@ -170,7 +171,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.refresh":              "r 刷新",
 		"bottom.help":                 "? 帮助",
 		"bottom.quit":                 "q 退出",
-		"bottom.lang":                 "L 语言",
+		"bottom.lang":                 "L English",
 
 		// ── Add file view ───────────────────────────────────────────────────
 		"add_file.title":              " ✚ 添加文件",
@@ -265,7 +266,10 @@ var translations = map[Locale]map[string]string{
 		"sync.result.header_file":   "文件",
 		"sync.result.header_action": "操作",
 		"sync.result.header_result": "结果",
-		"sync.result.close_hint":    "  Enter / Esc  关闭",
+		"sync.result.close_hint":    "  Enter / Esc  返回",
+		"sync.result.syncing_hint": "  同步中，请稍候...",
+		"sync.processing":          "处理中",
+		"sync.already_synced":      "已同步，无需操作",
 
 		// ── Refreshing / Auto sync ──────────────────────────────────────────
 		"refreshing":         "正在刷新...",
@@ -300,6 +304,7 @@ var translations = map[Locale]map[string]string{
 		"help.ops.upload":         "u  上传",
 		"help.ops.download":       "d  下载",
 		"help.ops.delete":         "x  删除",
+		"help.ops.note":           "n  备注",
 		"help.ops.set_dir":        "e  设置目录",
 		"help.features":           "功能",
 		"help.features.add":       "a  添加",
@@ -307,11 +312,25 @@ var translations = map[Locale]map[string]string{
 		"help.features.sync_all":  "y  同步全部",
 		"help.features.auto_sync": "o  自动同步",
 		"help.features.refresh":   "r  刷新",
-		"help.features.lang":      "L  切换语言",
+		"help.features.lang":      "L  Switch to English",
 		"help.features.quit":      "q  退出",
+		"help.features.update":    "U  检查更新",
 		"help.general":            "通用",
 		"help.general.copy":       "Ctrl+Y  复制路径/输入内容",
 		"help.general.password":   "p  显示/隐藏密码",
+
+		// ── Help hint ────────────────────────────────────────────────────────
+		"help.hint_close":         "Esc / ?  返回",
+		"confirm.hint_close":      "← → 选择  Enter 确认  Esc 返回",
+
+		// ── Note view ────────────────────────────────────────────────────────
+		"note.status":     "状态",
+		"note.size":       "大小",
+		"note.uploaded":   "上次上传",
+		"note.user":       "上传者",
+		"note.path":       "本地路径",
+		"note.empty":      "（无备注）",
+		"note.hint_close": "  Esc / n  返回",
 
 		// ── WebDAV storage ──────────────────────────────────────────────────
 		"webdav.endpoint_required": "请填写 WebDAV 地址",
@@ -338,6 +357,17 @@ var translations = map[Locale]map[string]string{
 		// ── Init ────────────────────────────────────────────────────────────
 		"init.failed": "初始化失败: %v",
 		"run.failed":  "运行失败: %v",
+
+		// ── Update ──────────────────────────────────────────────────────────
+		"update.available":        "发现新版本 %s，当前版本 %s",
+		"update.action":           "更新",
+		"update.downloading":      "正在下载更新...",
+		"update.success":          "更新成功，请重启应用以使用新版本",
+		"update.failed":           "更新失败: %s",
+		"update.brew_hint":        "检测到通过 Homebrew 安装，请使用 brew upgrade sfs 更新",
+		"update.check_failed":     "检查更新失败",
+		"update.current_latest":   "已是最新版本 (%s)",
+		"update.U":                "U 更新",
 	},
 
 	En: {
@@ -396,6 +426,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.upload":               "u Upload",
 		"bottom.download":             "d Download",
 		"bottom.delete":               "x Delete",
+		"bottom.note":                 "n Note",
 		"bottom.dir":                  "e Dir",
 		"bottom.add":                  "a Add",
 		"bottom.settings":             "s Settings",
@@ -404,7 +435,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.refresh":              "r Refresh",
 		"bottom.help":                 "? Help",
 		"bottom.quit":                 "q Quit",
-		"bottom.lang":                 "L Lang",
+		"bottom.lang":                 "L 中文",
 
 		// ── Add file view ───────────────────────────────────────────────────
 		"add_file.title":              " ✚ Add File",
@@ -499,7 +530,10 @@ var translations = map[Locale]map[string]string{
 		"sync.result.header_file":   "File",
 		"sync.result.header_action": "Action",
 		"sync.result.header_result": "Result",
-		"sync.result.close_hint":    "  Enter / Esc  Close",
+		"sync.result.close_hint":    "  Enter / Esc  Back",
+		"sync.result.syncing_hint": "  Syncing, please wait...",
+		"sync.processing":          "Processing",
+		"sync.already_synced":      "Already in sync",
 
 		// ── Refreshing / Auto sync ──────────────────────────────────────────
 		"refreshing":         "Refreshing...",
@@ -534,6 +568,7 @@ var translations = map[Locale]map[string]string{
 		"help.ops.upload":         "u  Upload",
 		"help.ops.download":       "d  Download",
 		"help.ops.delete":         "x  Delete",
+		"help.ops.note":           "n  Note",
 		"help.ops.set_dir":        "e  Set Directory",
 		"help.features":           "Features",
 		"help.features.add":       "a  Add",
@@ -541,11 +576,25 @@ var translations = map[Locale]map[string]string{
 		"help.features.sync_all":  "y  Sync All",
 		"help.features.auto_sync": "o  Auto Sync",
 		"help.features.refresh":   "r  Refresh",
-		"help.features.lang":      "L  Language",
+		"help.features.lang":      "L  Switch to 中文",
 		"help.features.quit":      "q  Quit",
+		"help.features.update":    "U  Check for updates",
 		"help.general":            "General",
 		"help.general.copy":       "Ctrl+Y  Copy path / input",
 		"help.general.password":   "p  Show/Hide password",
+
+		// ── Help hint ────────────────────────────────────────────────────────
+		"help.hint_close":         "Esc / ?  Back",
+		"confirm.hint_close":      "← → Select  Enter Confirm  Esc Back",
+
+		// ── Note view ────────────────────────────────────────────────────────
+		"note.status":     "Status",
+		"note.size":       "Size",
+		"note.uploaded":   "Last Upload",
+		"note.user":       "User",
+		"note.path":       "Local Path",
+		"note.empty":      "(No note)",
+		"note.hint_close": "  Esc / n  Back",
 
 		// ── WebDAV storage ──────────────────────────────────────────────────
 		"webdav.endpoint_required": "Please enter WebDAV URL",
@@ -572,5 +621,16 @@ var translations = map[Locale]map[string]string{
 		// ── Init ────────────────────────────────────────────────────────────
 		"init.failed": "Initialization failed: %v",
 		"run.failed":  "Runtime error: %v",
+
+		// ── Update ──────────────────────────────────────────────────────────
+		"update.available":        "New version %s available (current: %s)",
+		"update.action":           "Update",
+		"update.downloading":      "Downloading update...",
+		"update.success":          "Update successful, please restart to use the new version",
+		"update.failed":           "Update failed: %s",
+		"update.brew_hint":        "Homebrew install detected, use brew upgrade sfs to update",
+		"update.check_failed":     "Failed to check for updates",
+		"update.current_latest":   "Already on the latest version (%s)",
+		"update.U":                "U Update",
 	},
 }

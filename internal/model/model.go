@@ -10,7 +10,7 @@ const AppFullName = "SFS — SmallFileSync"
 
 // AppVersion is the current application version.
 // Declared as var so it can be overridden via -ldflags at build time.
-var AppVersion = "0.1.0"
+var AppVersion = "dev"
 
 // FileRecord represents a synced file entry (compatible with legacy uTools plugin).
 type FileRecord struct {

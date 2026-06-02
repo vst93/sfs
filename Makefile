@@ -6,7 +6,7 @@ BUILD_DIR := dist
 GO := go
 
 # Version (override with: make build VERSION=1.2.3)
-VERSION ?= 0.2.0
+VERSION ?= dev
 
 # Supported platforms
 PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64
@@ -14,7 +14,7 @@ PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64
 ## build: Compile the binary for current platform
 build:
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
-	$(GO) build -ldflags "-s -w -X smallFileSync/model.AppVersion=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) .
+	$(GO) build -ldflags "-s -w -X smallFileSync/internal/model.AppVersion=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) .
 	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
 ## build-all: Compile release archives for all platforms

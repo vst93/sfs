@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 	"smallFileSync/internal/i18n"
 	"smallFileSync/internal/model"
 	"smallFileSync/internal/storage"
+	"smallFileSync/internal/update"
 	"smallFileSync/internal/util"
 	"strings"
 	"time"
@@ -28,6 +28,9 @@ const (
 	viewSettings
 	viewSyncResult
 	viewSetDir
+	viewConfirm
+	viewHelp
+	viewNote
 )
 
 // App is the main Bubble Tea model.
@@ -71,28 +74,36 @@ type App struct {
 
 	// Sync state
 	syncing       bool
-	syncProgress  string
 	autoSync      bool
 	autoCountdown int
 
+	// Live sync state
+	syncItems  []model.FileRecord
+	syncIndex  int
+	syncType   string
+	syncIsAuto bool
+
+	// Probe cache: path -> localProbe
+	probeCache map[string]localProbe
+
+	// File state cache: item ID -> file state
+	fileStateCache map[string]model.FileStatus
+
 	// Confirm dialog
-	showConfirm   bool
 	confirmTitle  string
 	confirmMsg    string
 	confirmLabel  string
-	confirmAction func() tea.Msg
+	confirmAction tea.Cmd
+	confirmFocus  int // 0 = confirm action, 1 = cancel (default)
 
 	// Toast
 	toast     string
 	toastType string // success, warning, error
 	toastAt   time.Time
 
-	// Info board (sync result overlay)
-	showInfoBoard bool
-	infoContent   string
-
-	// Help
-	showHelp bool
+	// Update check
+	updateResult *update.CheckResult
+	updateDone   bool // whether the async check has completed
 
 	// SetDir state
 	setDirTarget   string
@@ -101,13 +112,9 @@ type App struct {
 }
 
 // Messages
-type syncDoneMsg struct {
-	result model.SyncResult
-}
+type syncDoneMsg struct{}
 
-type syncProgressMsg struct {
-	text string
-}
+type syncStepMsg struct{}
 
 type autoSyncTickMsg struct{}
 
@@ -119,6 +126,10 @@ type toastMsg struct {
 type clearToastMsg struct{}
 
 type fileListRefreshMsg struct{}
+
+type checkUpdateDoneMsg struct {
+	result update.CheckResult
+}
 
 // NewApp creates the main application model.
 func NewApp() (*App, error) {
@@ -168,6 +179,8 @@ func NewApp() (*App, error) {
 		pageRows:       10,
 		addFileInputs:  make([]textinput.Model, 2),
 		settingsInputs: make([]textinput.Model, 4),
+		probeCache:     make(map[string]localProbe),
+		fileStateCache: make(map[string]model.FileStatus),
 	}
 
 	// Init add file inputs
@@ -211,7 +224,16 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.loadFileList(),
 		a.startAutoSyncTicker(),
+		a.checkForUpdate(),
 	)
+}
+
+// checkForUpdate asynchronously checks for a new release.
+func (a *App) checkForUpdate() tea.Cmd {
+	return func() tea.Msg {
+		result := update.CheckLatestRelease(model.AppVersion)
+		return checkUpdateDoneMsg{result: result}
+	}
 }
 
 func (a *App) loadFileList() tea.Cmd {
@@ -257,8 +279,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// header ~4 lines, footer ~2 lines, table header 1 line => reserve ~10 lines
 		a.pageRows = max(3, msg.Height-10)
+		return a, nil
+
+	case tea.MouseMsg:
+		me := tea.MouseEvent(msg)
+		if me.IsWheel() {
+			if a.state == viewFileList {
+				if me.Button == tea.MouseButtonWheelUp {
+					a.moveCursor(a.cursor - 1)
+				} else if me.Button == tea.MouseButtonWheelDown {
+					a.moveCursor(a.cursor + 1)
+				}
+			}
+		}
 		return a, nil
 
 	case tea.KeyMsg:
@@ -266,16 +300,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case syncDoneMsg:
 		a.syncing = false
-		a.syncProgress = ""
-		result := msg.result
-		a.lastSyncResult = &result
-		a.showInfoBoard = true
-		a.infoContent = a.renderSyncResult(result)
-		return a, nil
+		a.syncItems = nil
+		a.probeCache = make(map[string]localProbe)
+		a.fileStateCache = make(map[string]model.FileStatus)
+		return a, a.loadFileList()
 
-	case syncProgressMsg:
-		a.syncProgress = msg.text
-		return a, nil
+	case syncStepMsg:
+		return a, a.doSyncStep()
 
 	case autoSyncTickMsg:
 		if a.autoSync && !a.syncing {
@@ -303,35 +334,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.cursor >= len(a.fileList) {
 			a.cursor = max(0, len(a.fileList)-1)
 		}
-		a.moveCursor(a.cursor) // re-clamp pageOffset
+		a.fileStateCache = make(map[string]model.FileStatus)
+		a.moveCursor(a.cursor)
 		return a, nil
+
+	case checkUpdateDoneMsg:
+		a.updateDone = true
+		a.updateResult = &msg.result
+		if msg.result.Error != nil {
+			return a, nil
+		}
+		if msg.result.IsBrew {
+			return a, a.showToast(i18n.T("update.brew_hint"), "warning")
+		}
+		if msg.result.HasUpdate {
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.available"), msg.result.LatestVersion, model.AppVersion), "warning")
+		}
+		return a, nil
+
+	case doUpdateMsg:
+		return a, tea.Batch(a.showToast(i18n.T("update.downloading"), "success"), a.doUpdate())
+
+	case updateCompleteMsg:
+		if msg.err != nil {
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), msg.err.Error()), "error")
+		}
+		// Success: print to stderr and quit (terminal is being restored)
+		fmt.Fprintf(os.Stderr, "\n%s\n", i18n.T("update.success"))
+		return a, tea.Quit
 	}
 
 	return a, nil
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Confirm dialog takes priority
-	if a.showConfirm {
-		return a.handleConfirmKey(msg)
-	}
-
-	// Help overlay
-	if a.showHelp {
-		if msg.String() == "?" || msg.String() == "esc" || msg.String() == "q" {
-			a.showHelp = false
-		}
-		return a, nil
-	}
-
-	// Info board overlay
-	if a.showInfoBoard {
-		if msg.String() == "esc" || msg.String() == "q" || msg.String() == "enter" {
-			a.showInfoBoard = false
-		}
-		return a, nil
-	}
-
 	// Global keys
 	switch msg.String() {
 	case "ctrl+c":
@@ -349,6 +385,14 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleSettingsKey(msg)
 	case viewSetDir:
 		return a.handleSetDirKey(msg)
+	case viewSyncResult:
+		return a.handleSyncResultKey(msg)
+	case viewConfirm:
+		return a.handleConfirmKey(msg)
+	case viewHelp:
+		return a.handleHelpKey(msg)
+	case viewNote:
+		return a.handleNoteKey(msg)
 	}
 
 	return a, nil
@@ -464,6 +508,9 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(a.loadFileList(), a.showToast(i18n.T("refreshing"), "success"))
 
+	case "U":
+		return a.handleUpdate()
+
 	// ── General ──
 	case "L":
 		newLocale := i18n.ToggleLocale()
@@ -485,7 +532,12 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.showToast(i18n.T("toast.no_dir"), "warning")
 
 	case "?":
-		a.showHelp = true
+		a.state = viewHelp
+
+	case "n":
+		if len(a.fileList) > 0 {
+			a.state = viewNote
+		}
 	}
 
 	return a, nil
@@ -501,7 +553,7 @@ func (a *App) handlePrimaryAction() (tea.Model, tea.Cmd) {
 	case "initial_upload":
 		return a, a.runSync(item.ID, "force_upload", false)
 	case "matched":
-		return a, a.runSync(item.ID, "force_download", false)
+		return a, a.showToast(i18n.T("sync.already_synced"), "success")
 	case "download", "missing":
 		return a, a.runSync(item.ID, "force_download", false)
 	case "conflict":
@@ -517,31 +569,30 @@ func (a *App) handleForceUpload() (tea.Model, tea.Cmd) {
 	if state.Key == "initial_upload" {
 		return a, a.runSync(item.ID, "force_upload", false)
 	}
-	a.showConfirm = true
+	a.state = viewConfirm
+	a.confirmFocus = 1
 	a.confirmTitle = i18n.T("confirm.cloud_overwrite.title")
 	a.confirmMsg = i18n.T("confirm.cloud_overwrite.msg")
 	a.confirmLabel = i18n.T("confirm.cloud_overwrite.action")
-	a.confirmAction = func() tea.Msg {
-		return a.doSync(item.ID, "force_upload", false)
-	}
+	a.confirmAction = a.runSync(item.ID, "force_upload", false)
 	return a, nil
 }
 
 func (a *App) handleForceDownload() (tea.Model, tea.Cmd) {
 	item := a.fileList[a.cursor]
-	a.showConfirm = true
+	a.state = viewConfirm
+	a.confirmFocus = 1
 	a.confirmTitle = i18n.T("confirm.local_overwrite.title")
 	a.confirmMsg = i18n.T("confirm.local_overwrite.msg")
 	a.confirmLabel = i18n.T("confirm.local_overwrite.action")
-	a.confirmAction = func() tea.Msg {
-		return a.doSync(item.ID, "force_download", false)
-	}
+	a.confirmAction = a.runSync(item.ID, "force_download", false)
 	return a, nil
 }
 
 func (a *App) handleDelete() (tea.Model, tea.Cmd) {
 	item := a.fileList[a.cursor]
-	a.showConfirm = true
+	a.state = viewConfirm
+	a.confirmFocus = 1
 	a.confirmTitle = i18n.T("confirm.delete.title")
 	a.confirmMsg = fmt.Sprintf(i18n.T("confirm.delete.msg"), item.FileName)
 	a.confirmLabel = i18n.T("confirm.delete.action")
@@ -574,14 +625,59 @@ func (a *App) handleSetDir() (tea.Model, tea.Cmd) {
 
 func (a *App) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y", "Y", "enter":
-		a.showConfirm = false
+	case "tab":
+		a.confirmFocus = (a.confirmFocus + 1) % 2
+		return a, nil
+	case "left", "right", "h", "l":
+		a.confirmFocus = (a.confirmFocus + 1) % 2
+		return a, nil
+	case "enter":
+		a.state = viewFileList
+		if a.confirmFocus == 0 && a.confirmAction != nil {
+			cmd := a.confirmAction
+			a.confirmAction = nil
+			return a, cmd
+		}
+		return a, nil
+	case "y", "Y":
+		a.state = viewFileList
 		if a.confirmAction != nil {
-			return a, a.confirmAction
+			cmd := a.confirmAction
+			a.confirmAction = nil
+			return a, cmd
 		}
 		return a, nil
 	case "n", "N", "esc":
-		a.showConfirm = false
+		a.state = viewFileList
+		return a, nil
+	}
+	return a, nil
+}
+
+func (a *App) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "?", "esc", "q":
+		a.state = viewFileList
+		return a, nil
+	}
+	return a, nil
+}
+
+func (a *App) handleSyncResultKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "enter":
+		if !a.syncing {
+			a.state = viewFileList
+		}
+		return a, nil
+	}
+	return a, nil
+}
+
+func (a *App) handleNoteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "n", "enter":
+		a.state = viewFileList
 		return a, nil
 	}
 	return a, nil
@@ -815,6 +911,7 @@ func (a *App) handleSetDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.setDirFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
 			return a, nil
 		}
+		a.fileStateCache = make(map[string]model.FileStatus)
 
 		a.state = viewFileList
 		return a, a.showToast(fmt.Sprintf(i18n.T("set_dir.saved"), dirPath), "success")
@@ -892,8 +989,30 @@ func (a *App) collectSettings() model.AppSettings {
 // Sync logic
 
 func (a *App) runSync(fileID, syncType string, isAuto bool) tea.Cmd {
+	// Build items list
+	var items []model.FileRecord
+	if fileID != "" {
+		idx := a.findFileIndex(fileID)
+		if idx >= 0 {
+			items = []model.FileRecord{a.fileList[idx]}
+		}
+	} else {
+		items = a.fileList
+	}
+
+	// Return a tea.Cmd that, when executed by bubbletea, sets up state
 	return func() tea.Msg {
-		return a.doSync(fileID, syncType, isAuto)
+		a.syncing = true
+		a.syncItems = items
+		a.syncIndex = 0
+		a.syncType = syncType
+		a.syncIsAuto = isAuto
+		a.lastSyncResult = &model.SyncResult{
+			IsAuto:    isAuto,
+			StartedAt: time.Now(),
+		}
+		a.state = viewSyncResult
+		return syncStepMsg{}
 	}
 }
 
@@ -907,184 +1026,160 @@ func (a *App) findFileIndex(id string) int {
 	return -1
 }
 
-func (a *App) doSync(fileID, syncType string, isAuto bool) tea.Msg {
-	a.syncing = true
-
-	// Wrap with a 5-minute timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	result := model.SyncResult{
-		IsAuto:    isAuto,
-		StartedAt: time.Now(),
-	}
-
-	// For single-file sync, use direct index lookup
-	var items []model.FileRecord
-	if fileID != "" {
-		idx := a.findFileIndex(fileID)
-		if idx >= 0 {
-			items = []model.FileRecord{a.fileList[idx]}
-		}
-	} else {
-		items = a.fileList
-	}
-
-	for _, item := range items {
-		// Check timeout
-		select {
-		case <-ctx.Done():
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: "...", Action: i18n.T("sync.action.skip"), Status: i18n.T("common.failure"),
-				Reason: "sync timeout (5 minutes exceeded)",
-			})
-			return syncDoneMsg{result: result}
-		default:
+func (a *App) doSyncStep() tea.Cmd {
+	return func() tea.Msg {
+		// No more items
+		if a.syncIndex >= len(a.syncItems) {
+			a.syncing = false
+			return syncDoneMsg{}
 		}
 
-		result.Summary.Checked++
-		state := a.computeFileState(item)
+		item := a.syncItems[a.syncIndex]
+		a.syncIndex++
+
+		a.lastSyncResult.Summary.Checked++
+		state := a.computeFileStateUncached(item)
+
+		var detail model.SyncDetail
 
 		if !a.hasLocalDir(item.ID) {
-			result.Summary.Unbound++
-			result.Details = append(result.Details, model.SyncDetail{
+			a.lastSyncResult.Summary.Unbound++
+			detail = model.SyncDetail{
 				FileName: item.FileName, Action: i18n.T("sync.action.unprocessed"), Status: i18n.T("common.failure"), Reason: state.Detail,
-			})
-			continue
-		}
-
-		localPath := a.localPath(item)
-		probe := a.probeLocal(localPath)
-		hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && item.StorageKey() != "" && storage.HasStoredFileData(a.webdavStore, item.StorageKey())
-
-		// Initial upload
-		if state.Key == "initial_upload" {
-			if syncType == "force_download" {
-				result.Summary.Failed++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.cloud_not_available"),
-				})
-				continue
 			}
-			if !probe.ok {
-				result.Summary.Failed++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.local_read_failed"),
-				})
-				continue
+		} else {
+			detail = a.doSyncItem(item)
+		}
+
+		// Update summary from detail (skip unbound — already counted above)
+		if detail.Action == i18n.T("sync.action.unprocessed") {
+			// already counted
+		} else if detail.Status == i18n.T("common.success") {
+			switch detail.Action {
+			case i18n.T("sync.action.upload"):
+				a.lastSyncResult.Summary.Uploaded++
+			case i18n.T("sync.action.download"):
+				a.lastSyncResult.Summary.Downloaded++
+			case i18n.T("sync.action.skip"):
+				a.lastSyncResult.Summary.Skipped++
 			}
-			uploadResult := a.uploadFile(item, localPath, probe.md5)
-			if uploadResult.success {
-				result.Summary.Uploaded++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.first_upload"),
-				})
-			} else {
-				result.Summary.Failed++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: uploadResult.message,
-				})
+		} else {
+			a.lastSyncResult.Summary.Failed++
+		}
+
+		a.lastSyncResult.Details = append(a.lastSyncResult.Details, detail)
+
+		return tea.Batch(tea.Tick(0, func(t time.Time) tea.Msg { return syncStepMsg{} }))()
+	}
+}
+
+func (a *App) doSyncItem(item model.FileRecord) model.SyncDetail {
+	syncType := a.syncType
+
+	localPath := a.localPath(item)
+	probe := a.probeLocal(localPath)
+	hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && item.StorageKey() != "" && storage.HasStoredFileData(a.webdavStore, item.StorageKey())
+	state := a.computeFileStateUncached(item)
+
+	// Initial upload
+	if state.Key == "initial_upload" {
+		if syncType == "force_download" {
+			return model.SyncDetail{
+				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.cloud_not_available"),
 			}
-			continue
 		}
-
-		// Missing local, has remote -> restore
-		if (!probe.ok || probe.md5 == "") && hasRemote {
-			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.StorageKey()); err != nil {
-				result.Summary.Failed++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
-				})
-				continue
-			}
-			a.commitCurrentLocalState(item.ID, localPath)
-			result.Summary.Downloaded++
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.local_restored"),
-			})
-			continue
-		}
-
-		// Skip if matched (not forced)
-		if syncType != "force_download" && probe.ok && probe.md5 == item.FileMD5 {
-			result.Summary.Skipped++
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.skip"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.already_synced"),
-			})
-			continue
-		}
-
-		// No local, no remote
-		if !probe.ok && !hasRemote {
-			result.Summary.Failed++
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.unprocessed"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.both_missing"),
-			})
-			continue
-		}
-
-		// Conflict (auto skip)
-		if state.Key == "conflict" && syncType != "force_upload" && syncType != "force_download" {
-			result.Summary.Skipped++
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.skip"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.conflict_manual"),
-			})
-			continue
-		}
-
-		// Decide direction
-		shouldDownload := syncType == "force_download" || state.Key == "download" ||
-			(syncType != "force_upload" && item.LastChangeTime > 0 && probe.mtime > 0 && probe.mtime < item.LastChangeTime)
-
-		if shouldDownload {
-			if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.StorageKey()); err != nil {
-				result.Summary.Failed++
-				result.Details = append(result.Details, model.SyncDetail{
-					FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
-				})
-				continue
-			}
-			a.commitCurrentLocalState(item.ID, localPath)
-			result.Summary.Downloaded++
-			reason := i18n.T("sync.reason.cloud_newer")
-			if syncType == "force_download" {
-				reason = i18n.T("sync.reason.overwrite_local")
-			}
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.success"), Reason: reason,
-			})
-			continue
-		}
-
-		// Upload
 		if !probe.ok {
-			result.Summary.Failed++
-			result.Details = append(result.Details, model.SyncDetail{
+			return model.SyncDetail{
 				FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.local_read_failed"),
-			})
-			continue
+			}
 		}
 		uploadResult := a.uploadFile(item, localPath, probe.md5)
 		if uploadResult.success {
-			result.Summary.Uploaded++
-			reason := i18n.T("sync.reason.local_newer")
-			if syncType == "force_upload" {
-				reason = i18n.T("sync.reason.overwrite_cloud")
+			return model.SyncDetail{
+				FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.first_upload"),
 			}
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.success"), Reason: reason,
-			})
-		} else {
-			result.Summary.Failed++
-			result.Details = append(result.Details, model.SyncDetail{
-				FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: uploadResult.message,
-			})
+		}
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: uploadResult.message,
 		}
 	}
 
-	a.syncing = false
-	_ = a.loadFileList()()
-	return syncDoneMsg{result: result}
+	// Missing local, has remote -> restore
+	if (!probe.ok || probe.md5 == "") && hasRemote {
+		if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.StorageKey()); err != nil {
+			return model.SyncDetail{
+				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
+			}
+		}
+		a.commitCurrentLocalState(item.ID, localPath)
+		a.syncRemoteMetadata(item, localPath)
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.local_restored"),
+		}
+	}
+
+	// Skip if matched (not forced)
+	if syncType != "force_download" && probe.ok && probe.md5 == item.FileMD5 {
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.skip"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.already_synced"),
+		}
+	}
+
+	// No local, no remote
+	if !probe.ok && !hasRemote {
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.unprocessed"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.both_missing"),
+		}
+	}
+
+	// Conflict (auto skip)
+	if state.Key == "conflict" && syncType != "force_upload" && syncType != "force_download" {
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.skip"), Status: i18n.T("common.success"), Reason: i18n.T("sync.reason.conflict_manual"),
+		}
+	}
+
+	// Decide direction
+	shouldDownload := syncType == "force_download" || state.Key == "download" ||
+		(syncType != "force_upload" && item.LastChangeTime > 0 && probe.mtime > 0 && probe.mtime < item.LastChangeTime)
+
+	if shouldDownload {
+		if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.StorageKey()); err != nil {
+			return model.SyncDetail{
+				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
+			}
+		}
+		a.commitCurrentLocalState(item.ID, localPath)
+		// Update remote metadata to match the actual downloaded data
+		a.syncRemoteMetadata(item, localPath)
+		reason := i18n.T("sync.reason.cloud_newer")
+		if syncType == "force_download" {
+			reason = i18n.T("sync.reason.overwrite_local")
+		}
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.success"), Reason: reason,
+		}
+	}
+
+	// Upload
+	if !probe.ok {
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.local_read_failed"),
+		}
+	}
+	uploadResult := a.uploadFile(item, localPath, probe.md5)
+	if uploadResult.success {
+		reason := i18n.T("sync.reason.local_newer")
+		if syncType == "force_upload" {
+			reason = i18n.T("sync.reason.overwrite_cloud")
+		}
+		return model.SyncDetail{
+			FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.success"), Reason: reason,
+		}
+	}
+	return model.SyncDetail{
+		FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: uploadResult.message,
+	}
 }
 
 type uploadResult struct {
@@ -1223,18 +1318,25 @@ func (a *App) probeLocal(path string) localProbe {
 	}
 	info, err := os.Stat(path)
 	if err != nil {
+		delete(a.probeCache, path)
 		return localProbe{}
+	}
+	mtime := info.ModTime().UnixMilli()
+	if cached, ok := a.probeCache[path]; ok && cached.mtime == mtime {
+		return cached
 	}
 	md5Hash, err := util.CalculateFileMD5(path)
 	if err != nil {
 		return localProbe{}
 	}
-	return localProbe{
+	result := localProbe{
 		ok:    true,
 		md5:   md5Hash,
-		mtime: info.ModTime().UnixMilli(),
+		mtime: mtime,
 		size:  info.Size(),
 	}
+	a.probeCache[path] = result
+	return result
 }
 
 func (a *App) commitCurrentLocalState(fileID, localPath string) {
@@ -1254,7 +1356,45 @@ func (a *App) commitCurrentLocalState(fileID, localPath string) {
 	_ = a.localStore.SaveFileStateMap(a.uid, a.localStateMap)
 }
 
+// syncRemoteMetadata updates the remote fileList record to match the actual
+// local file content. This fixes cases where the remote FileMD5 drifted
+// from the actual stored file data (e.g. after an interrupted upload from
+// another device or a manual edit of the fileList).
+func (a *App) syncRemoteMetadata(item model.FileRecord, localPath string) {
+	newMD5, err := util.CalculateFileMD5(localPath)
+	if err != nil {
+		return
+	}
+	for i := range a.fileList {
+		if a.fileList[i].ID == item.ID && a.fileList[i].FileMD5 != newMD5 {
+		a.fileList[i].FileMD5 = newMD5
+		a.fileList[i].LastChangeTime = time.Now().UnixMilli()
+		break
+		}
+	}
+	_ = a.webdavStore.SaveFileList(a.fileList)
+}
+
 func (a *App) computeFileState(item model.FileRecord) model.FileStatus {
+	if cached, ok := a.fileStateCache[item.ID]; ok {
+		return cached
+	}
+
+	var result model.FileStatus
+	if !a.hasLocalDir(item.ID) {
+		result = model.FileStatus{
+			Key:    "unbound",
+			Text:   i18n.T("status.unbound"),
+			Detail: i18n.T("status.unbound.detail"),
+		}
+	} else {
+		result = a.computeFileStateUncached(item)
+	}
+	a.fileStateCache[item.ID] = result
+	return result
+}
+
+func (a *App) computeFileStateUncached(item model.FileRecord) model.FileStatus {
 	if !a.hasLocalDir(item.ID) {
 		return model.FileStatus{
 			Key:    "unbound",
@@ -1385,5 +1525,49 @@ func (a *App) moveCursor(target int) {
 	}
 	if a.pageOffset < 0 {
 		a.pageOffset = 0
+	}
+}
+
+// ── Update ──────────────────────────────────────────────────────────────────
+
+type doUpdateMsg struct{}
+
+type updateCompleteMsg struct {
+	err error
+}
+
+// handleUpdate initiates the self-update process.
+func (a *App) handleUpdate() (tea.Model, tea.Cmd) {
+	if a.updateResult == nil {
+		// Check hasn't finished yet
+		return a, a.showToast(i18n.T("update.check_failed"), "warning")
+	}
+	if a.updateResult.Error != nil {
+		return a, a.showToast(i18n.T("update.check_failed"), "error")
+	}
+	if a.updateResult.IsBrew {
+		return a, a.showToast(i18n.T("update.brew_hint"), "warning")
+	}
+	if !a.updateResult.HasUpdate {
+		return a, a.showToast(fmt.Sprintf(i18n.T("update.current_latest"), model.AppVersion), "success")
+	}
+
+	// Show confirm dialog for the update
+	a.state = viewConfirm
+	a.confirmFocus = 0 // default to "confirm"
+	a.confirmTitle = fmt.Sprintf(i18n.T("update.available"), a.updateResult.LatestVersion, model.AppVersion)
+	a.confirmMsg = ""
+	a.confirmLabel = i18n.T("update.action")
+	a.confirmAction = func() tea.Msg {
+		return doUpdateMsg{}
+	}
+	return a, nil
+}
+
+// doUpdate downloads and applies the update, then quits.
+func (a *App) doUpdate() tea.Cmd {
+	return func() tea.Msg {
+		err := update.DownloadAndUpdate(a.updateResult.DownloadURL)
+		return updateCompleteMsg{err: err}
 	}
 }

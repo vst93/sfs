@@ -156,7 +156,7 @@ func (s *WebDAVStore) SaveFileList(list []model.FileRecord) error {
 func (s *WebDAVStore) GetFile(key string) ([]byte, error) {
 	var result []byte
 	err := withRetry(2, func() error {
-		url := s.buildURL("file_" + key)
+		url := s.buildURL(key)
 		resp, e := s.doRequest("GET", url, nil, "")
 		if e != nil {
 			return fmt.Errorf("WebDAV read failed: %w", e)
@@ -226,7 +226,7 @@ func withRetry(maxRetries int, fn func() error) error {
 // SaveFile writes a whole file to remote storage.
 func (s *WebDAVStore) SaveFile(key string, data []byte) error {
 	err := withRetry(2, func() error {
-		url := s.buildURL("file_" + key)
+		url := s.buildURL(key)
 		if e := s.ensureParentCollections(url); e != nil {
 			return e
 		}
@@ -246,7 +246,7 @@ func (s *WebDAVStore) SaveFile(key string, data []byte) error {
 
 // RemoveFile deletes a file from remote storage.
 func (s *WebDAVStore) RemoveFile(key string) error {
-	url := s.buildURL("file_" + key)
+	url := s.buildURL(key)
 	resp, err := s.doRequest("DELETE", url, nil, "")
 	if err != nil {
 		return fmt.Errorf("WebDAV delete failed: %w", err)

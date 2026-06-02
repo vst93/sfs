@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"smallFileSync/internal/i18n"
 	"smallFileSync/internal/model"
+	"smallFileSync/internal/util"
 	"strings"
 	"time"
 
@@ -25,93 +26,33 @@ func (a *App) View() string {
 		body.WriteString(a.renderSettings())
 	case viewSetDir:
 		body.WriteString(a.renderSetDir())
+	case viewSyncResult:
+		body.WriteString(a.renderSyncResultView())
+	case viewConfirm:
+		body.WriteString(a.renderConfirmView())
+	case viewHelp:
+		body.WriteString(a.renderHelpView())
+	case viewNote:
+		body.WriteString(a.renderNoteView())
 	}
 	if a.toast != "" {
 		body.WriteString("\n")
 		a.renderToast(&body)
 	}
 
-	// Check whether an overlay is active — overlay handles its own height.
-	showOverlay := a.showConfirm || a.showInfoBoard || a.showHelp
-
 	bodyStr := body.String()
-
-	if !showOverlay {
-		// Normal mode: pad body so bottom bar stays at the very bottom.
-		bodyStr = strings.TrimRight(bodyStr, "\n")
-		bodyLines := 0
-		if bodyStr != "" {
-			bodyLines = strings.Count(bodyStr, "\n") + 1
-		}
-		available := a.height - 1 // 1 line for bottom bar
-		padding := available - bodyLines
-		if padding > 0 {
-			bodyStr += strings.Repeat("\n", padding)
-		}
-	} else {
-		// Overlay mode: renderOverlay fills the content area itself,
-		// so the bottom bar always lands on the last line.
-		if a.showConfirm {
-			bodyStr = a.renderOverlay(a.renderConfirm())
-		} else if a.showInfoBoard {
-			bodyStr = a.renderOverlay(a.infoContent)
-		} else if a.showHelp {
-			bodyStr = a.renderOverlay(a.renderHelp())
-		}
+	bodyStr = strings.TrimRight(bodyStr, "\n")
+	bodyLines := 0
+	if bodyStr != "" {
+		bodyLines = strings.Count(bodyStr, "\n") + 1
+	}
+	available := a.height - 1 // 1 line for bottom bar
+	padding := available - bodyLines
+	if padding > 0 {
+		bodyStr += strings.Repeat("\n", padding)
 	}
 
-	if showOverlay {
-		return bodyStr + a.renderBottomBar()
-	}
 	return bodyStr + "\n" + a.renderBottomBar()
-}
-
-// ── Overlay renderer ────────────────────────────────────────────────────────
-
-func (a *App) renderOverlay(overlay string) string {
-	contentHeight := a.height - 1
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-	contentWidth := a.width
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorBorder).
-		Padding(0, 1).
-		Width(min(contentWidth-4, 76)).
-		Render(overlay)
-
-	boxLines := strings.Split(box, "\n")
-	boxHeight := len(boxLines)
-
-	topPad := (contentHeight - boxHeight) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-	bottomPad := contentHeight - topPad - boxHeight
-	if bottomPad < 0 {
-		bottomPad = 0
-	}
-
-	var out strings.Builder
-	for i := 0; i < topPad; i++ {
-		out.WriteString("\n")
-	}
-	for _, line := range boxLines {
-		hPad := (contentWidth - lipgloss.Width(line)) / 2
-		if hPad < 0 {
-			hPad = 0
-		}
-		out.WriteString(strings.Repeat(" ", hPad))
-		out.WriteString(line)
-		out.WriteString("\n")
-	}
-	for i := 0; i < bottomPad; i++ {
-		out.WriteString("\n")
-	}
-
-	return out.String()
 }
 
 // ── Toast ───────────────────────────────────────────────────────────────────
@@ -151,6 +92,10 @@ func (a *App) renderBottomBar() string {
 	} else if a.autoSync {
 		right = fmt.Sprintf(i18n.T("bottom.auto_sync"), a.autoCountdown, storage)
 	}
+	// Show update badge if new version available
+	if a.updateDone && a.updateResult != nil && a.updateResult.HasUpdate {
+		right = styleWarning.Render(fmt.Sprintf("↑ %s", a.updateResult.LatestVersion)) + "  " + right
+	}
 
 	parts := []string{
 		i18n.T("bottom.navigate"),
@@ -158,6 +103,7 @@ func (a *App) renderBottomBar() string {
 		i18n.T("bottom.upload"),
 		i18n.T("bottom.download"),
 		i18n.T("bottom.delete"),
+		i18n.T("bottom.note"),
 		i18n.T("bottom.dir"),
 		i18n.T("bottom.add"),
 		i18n.T("bottom.settings"),
@@ -531,45 +477,51 @@ func (a *App) renderSettings() string {
 	return b.String()
 }
 
-// ─── Confirm ─────────────────────────────────────────────────────────────────
+// ─── Confirm (full-page view) ───────────────────────────────────────────────
 
-func (a *App) renderConfirm() string {
+func (a *App) renderConfirmView() string {
 	var b strings.Builder
 
-	// Title with danger styling
-	titleIcon := "⚠"
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  " + titleIcon + "  " + a.confirmTitle))
+	// Title
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  ⚠  " + a.confirmTitle))
+	b.WriteString("\n")
+	b.WriteString(separator(a.width - 4))
 	b.WriteString("\n\n")
 
 	// Message body
 	b.WriteString("  " + a.confirmMsg)
 	b.WriteString("\n\n")
 
-	// Divider
-	b.WriteString("  " + separator(48))
-	b.WriteString("\n\n")
-
 	// Action buttons
 	if a.confirmAction != nil {
-		b.WriteString("  ")
-		b.WriteString(pillBtn(a.confirmLabel, colorDanger))
-		b.WriteString("   ")
-		b.WriteString(pillBtn(i18n.T("common.cancel"), colorMuted))
-		b.WriteString("\n")
+		var confirmBtn, cancelBtn string
+		if a.confirmFocus == 0 {
+			confirmBtn = pillBtnHighlight(fmt.Sprintf("y %s", a.confirmLabel))
+			cancelBtn = pillBtn(fmt.Sprintf("n %s", i18n.T("common.cancel")), colorMuted)
+		} else {
+			confirmBtn = pillBtn(fmt.Sprintf("y %s", a.confirmLabel), colorDanger)
+			cancelBtn = pillBtnHighlight(fmt.Sprintf("n %s", i18n.T("common.cancel")))
+		}
+		b.WriteString("  " + confirmBtn + "   " + cancelBtn + "\n")
 	} else {
-		b.WriteString("  " + pillBtn(i18n.T("common.close"), colorMuted))
+		b.WriteString("  " + pillBtnHighlight(i18n.T("common.close")))
 	}
+
+	b.WriteString("\n\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	b.WriteString(styleMuted.Render("  " + i18n.T("confirm.hint_close")))
 
 	return b.String()
 }
 
-// ─── Help ────────────────────────────────────────────────────────────────────
+// ─── Help (full-page view) ──────────────────────────────────────────────────
 
-func (a *App) renderHelp() string {
+func (a *App) renderHelpView() string {
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("help.title")))
 	b.WriteString("\n")
-	b.WriteString(separator(52))
+	b.WriteString(separator(a.width - 4))
 	b.WriteString("\n")
 
 	sections := []struct {
@@ -577,8 +529,8 @@ func (a *App) renderHelp() string {
 		items []string
 	}{
 		{i18n.T("help.nav"), []string{i18n.T("help.nav.up"), i18n.T("help.nav.down"), i18n.T("help.nav.page_up"), i18n.T("help.nav.page_down"), i18n.T("help.nav.first_last")}},
-		{i18n.T("help.ops"), []string{i18n.T("help.ops.execute"), i18n.T("help.ops.upload"), i18n.T("help.ops.download"), i18n.T("help.ops.delete"), i18n.T("help.ops.set_dir")}},
-		{i18n.T("help.features"), []string{i18n.T("help.features.add"), i18n.T("help.features.settings"), i18n.T("help.features.sync_all"), i18n.T("help.features.auto_sync"), i18n.T("help.features.refresh"), i18n.T("help.features.lang"), i18n.T("help.features.quit")}},
+		{i18n.T("help.ops"), []string{i18n.T("help.ops.execute"), i18n.T("help.ops.upload"), i18n.T("help.ops.download"), i18n.T("help.ops.delete"), i18n.T("help.ops.note"), i18n.T("help.ops.set_dir")}},
+		{i18n.T("help.features"), []string{i18n.T("help.features.add"), i18n.T("help.features.settings"), i18n.T("help.features.sync_all"), i18n.T("help.features.auto_sync"), i18n.T("help.features.refresh"), i18n.T("help.features.update"), i18n.T("help.features.lang"), i18n.T("help.features.quit")}},
 		{i18n.T("help.general"), []string{i18n.T("help.general.copy"), i18n.T("help.general.password")}},
 	}
 
@@ -600,10 +552,85 @@ func (a *App) renderHelp() string {
 			}
 		}
 	}
+
+	b.WriteString("\n\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	b.WriteString(styleMuted.Render("  " + i18n.T("help.hint_close")))
+
 	return b.String()
 }
 
-// ─── Sync result ─────────────────────────────────────────────────────────────
+// ─── Note (full-page view) ──────────────────────────────────────────────────
+
+func (a *App) renderNoteView() string {
+	var b strings.Builder
+	item := a.fileList[a.cursor]
+	state := a.computeFileState(item)
+
+	// ── Title ──
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("  📝  " + item.FileName))
+	b.WriteString("\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+
+	// ── Status line ──
+	b.WriteString("\n")
+	b.WriteString("  " + styleMuted.Render(i18n.T("note.status")+": ") + state.Text)
+	if item.Size > 0 {
+		var sizeStr string
+		if item.Size >= 1024 {
+			sizeStr = fmt.Sprintf("%.1fM", item.Size/1024)
+		} else {
+			sizeStr = fmt.Sprintf("%.0fK", item.Size)
+		}
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.size")+": ") + sizeStr)
+	}
+	if item.LastUploadTime > 0 {
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.uploaded")+": ") + time.UnixMilli(item.LastUploadTime).Format("2006-01-02 15:04"))
+	}
+	if item.LastUploadUser != "" {
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.user")+": ") + item.LastUploadUser)
+	}
+	b.WriteString("\n")
+
+	// ── Local path ──
+	b.WriteString("\n")
+	dir := a.localDirMap[item.ID]
+	if dir != "" {
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + dir + util.FileSeparator() + item.FileName)
+	} else {
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + i18n.T("file_list.no_dir"))
+	}
+	b.WriteString("\n")
+
+	// ── Note ──
+	b.WriteString("\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	b.WriteString("\n")
+	if item.Note != "" {
+		b.WriteString("  " + item.Note)
+	} else {
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.empty")))
+	}
+	b.WriteString("\n\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	b.WriteString(styleMuted.Render("  " + i18n.T("note.hint_close")))
+
+	return b.String()
+}
+
+// ─── Sync result (full-page view) ────────────────────────────────────────────
+
+func (a *App) renderSyncResultView() string {
+	result := a.lastSyncResult
+	if result == nil {
+		return ""
+	}
+	return a.renderSyncResult(*result)
+}
 
 func (a *App) renderSyncResult(result model.SyncResult) string {
 	s := result.Summary
@@ -616,11 +643,39 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 		b.WriteString(styleMuted.Render(i18n.T("sync.result.auto")))
 	}
 	b.WriteString("\n")
-	b.WriteString(separator(52))
+	b.WriteString(separator(a.width - 4))
 	b.WriteString("\n")
 
+	// ── Progress bar (when still syncing) ──
+	if a.syncing && len(a.syncItems) > 0 {
+		total := len(a.syncItems)
+		done := a.syncIndex
+		if done > total {
+			done = total
+		}
+		barWidth := min(40, a.width-10)
+		if barWidth < 4 {
+			barWidth = 4
+		}
+		filled := 0
+		if total > 0 {
+			filled = done * barWidth / total
+		}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		progress := fmt.Sprintf("  [%s] %d/%d", bar, done, total)
+		b.WriteString("\n" + progress)
+		// Show current file being processed
+		if done < total {
+			curItem := a.syncItems[done]
+			b.WriteString("\n  " + styleMuted.Render(i18n.T("sync.processing")+": ") + truncate(curItem.FileName, 30))
+		}
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
+	}
+
 	// ── Summary row ──
-	b.WriteString("\n  ")
+	b.WriteString("  ")
 	summaryItems := []string{}
 	if s.Checked > 0 {
 		summaryItems = append(summaryItems, fmt.Sprintf(i18n.T("sync.result.checked"), s.Checked))
@@ -646,7 +701,7 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 	// ── Detail table ──
 	if len(result.Details) > 0 {
 		b.WriteString("\n")
-		b.WriteString("  " + separator(50))
+		b.WriteString("  " + separator(a.width-8))
 		b.WriteString("\n")
 
 		// Sort: failures first
@@ -665,7 +720,7 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 		hdrStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
 		b.WriteString("  " + hdrStyle.Render(fmt.Sprintf("%-4s  %-14s  %-8s  %s", "", i18n.T("sync.result.header_file"), i18n.T("sync.result.header_action"), i18n.T("sync.result.header_result"))))
 		b.WriteString("\n")
-		b.WriteString("  " + separator(50))
+		b.WriteString("  " + separator(a.width-8))
 		b.WriteString("\n")
 
 		for _, d := range sorted {
@@ -685,11 +740,17 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 				reasonStyle.Render(d.Reason),
 			))
 		}
-		b.WriteString("  " + separator(50))
+		b.WriteString("  " + separator(a.width-8))
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styleMuted.Render(i18n.T("sync.result.close_hint")))
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	if a.syncing {
+		b.WriteString(styleMuted.Render("  " + i18n.T("sync.result.syncing_hint")))
+	} else {
+		b.WriteString(styleMuted.Render("  " + i18n.T("sync.result.close_hint")))
+	}
 
 	return b.String()
 }

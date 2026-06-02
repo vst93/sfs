@@ -9,7 +9,7 @@ permissions:
 
 env:
   BINARY_PREFIX: sfs
-  LD_FLAGS: "-w -s -X smallFileSync/model.AppVersion="
+  LD_FLAGS: "-w -s -X smallFileSync/internal/model.AppVersion="
 
 jobs:
   build:
