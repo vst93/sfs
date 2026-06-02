@@ -89,6 +89,9 @@ type App struct {
 	// File state cache: item ID -> file state
 	fileStateCache map[string]model.FileStatus
 
+	// Last sync time (for status display)
+	lastSyncTime time.Time
+
 	// Confirm dialog
 	confirmTitle  string
 	confirmMsg    string
@@ -126,6 +129,8 @@ type toastMsg struct {
 type clearToastMsg struct{}
 
 type fileListRefreshMsg struct{}
+
+type periodicRefreshMsg struct{}
 
 type checkUpdateDoneMsg struct {
 	result update.CheckResult
@@ -224,7 +229,7 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.loadFileList(),
 		a.startAutoSyncTicker(),
-		a.checkForUpdate(),
+		a.startPeriodicRefresh(),
 	)
 }
 
@@ -259,6 +264,12 @@ func (a *App) loadFileList() tea.Cmd {
 func (a *App) startAutoSyncTicker() tea.Cmd {
 	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
 		return autoSyncTickMsg{}
+	})
+}
+
+func (a *App) startPeriodicRefresh() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+		return periodicRefreshMsg{}
 	})
 }
 
@@ -301,8 +312,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncDoneMsg:
 		a.syncing = false
 		a.syncItems = nil
+		a.lastSyncTime = time.Now()
 		a.probeCache = make(map[string]localProbe)
 		a.fileStateCache = make(map[string]model.FileStatus)
+		if a.syncIsAuto {
+			// Auto sync: stay on file list, show toast summary, refresh list
+			var toast string
+			if a.lastSyncResult != nil {
+				s := a.lastSyncResult.Summary
+				parts := []string{}
+				if s.Uploaded > 0 {
+					parts = append(parts, fmt.Sprintf("↑%d", s.Uploaded))
+				}
+				if s.Downloaded > 0 {
+					parts = append(parts, fmt.Sprintf("↓%d", s.Downloaded))
+				}
+				if s.Failed > 0 {
+					parts = append(parts, fmt.Sprintf("✕%d", s.Failed))
+				}
+				if len(parts) > 0 {
+					toast = i18n.T("auto_sync.done") + "  " + strings.Join(parts, "  ")
+				} else {
+					toast = i18n.T("auto_sync.no_change")
+				}
+			}
+			a.state = viewFileList
+			return a, tea.Batch(a.loadFileList(), a.showToast(toast, "success"))
+		}
 		return a, a.loadFileList()
 
 	case syncStepMsg:
@@ -330,24 +366,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.toast = ""
 		return a, nil
 
+	case periodicRefreshMsg:
+		if a.isStorageConfigured() && !a.syncing {
+			return a, tea.Batch(a.loadFileList(), a.startPeriodicRefresh())
+		}
+		return a, a.startPeriodicRefresh()
+
 	case fileListRefreshMsg:
 		if a.cursor >= len(a.fileList) {
 			a.cursor = max(0, len(a.fileList)-1)
 		}
 		a.fileStateCache = make(map[string]model.FileStatus)
 		a.moveCursor(a.cursor)
+		// After file list loaded, check for update in the background
+		if !a.updateDone {
+			return a, a.checkForUpdate()
+		}
 		return a, nil
 
 	case checkUpdateDoneMsg:
 		a.updateDone = true
 		a.updateResult = &msg.result
 		if msg.result.Error != nil {
-			return a, nil
-		}
-		if msg.result.IsBrew {
-			return a, a.showToast(i18n.T("update.brew_hint"), "warning")
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.check_failed")+": %s", msg.result.Error.Error()), "warning")
 		}
 		if msg.result.HasUpdate {
+			if msg.result.IsBrew {
+				return a, a.showToast(fmt.Sprintf(i18n.T("update.brew_hint")+" (%s → %s)", model.AppVersion, msg.result.LatestVersion), "warning")
+			}
 			return a, a.showToast(fmt.Sprintf(i18n.T("update.available"), msg.result.LatestVersion, model.AppVersion), "warning")
 		}
 		return a, nil
@@ -368,6 +414,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Bracketed paste (e.g. file drag into terminal)
+	if msg.Paste {
+		pasted := string(msg.Runes)
+		pasted = strings.TrimSpace(pasted)
+		if pasted != "" {
+			return a.handlePaste(pasted)
+		}
+	}
+
 	// Global keys
 	switch msg.String() {
 	case "ctrl+c":
@@ -395,6 +450,44 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleNoteKey(msg)
 	}
 
+	return a, nil
+}
+
+// handlePaste processes a pasted string (e.g. from file drag-and-drop).
+func (a *App) handlePaste(pasted string) (tea.Model, tea.Cmd) {
+	// Normalize: expand ~ and strip surrounding quotes
+	path := strings.TrimSpace(pasted)
+	path = strings.Trim(path, "\"'")
+	if strings.HasPrefix(path, "~") {
+		home, _ := os.UserHomeDir()
+		path = filepath.Join(home, path[1:])
+	}
+
+	// Check if it's a valid file (not a directory)
+	info, err := os.Stat(path)
+	if err != nil {
+		return a, a.showToast(fmt.Sprintf(i18n.T("paste.invalid_path"), path), "warning")
+	}
+	if info.IsDir() {
+		return a, a.showToast(i18n.T("paste.is_dir"), "warning")
+	}
+	if info.Size() > 200*1024*1024 {
+		return a, a.showToast(i18n.T("paste.too_large"), "warning")
+	}
+
+	// Configure storage check
+	if !a.isStorageConfigured() {
+		return a, a.showToast(i18n.T("warn.configure_storage_s"), "warning")
+	}
+
+	// Open the add-file view with the path pre-filled
+	a.state = viewAddFile
+	a.addFileFocus = 1 // focus on the note field since path is already filled
+	a.addFilePath = path
+	a.addFileStats = info
+	a.addFileFeedback = ""
+	a.addFileInputs[0].SetValue(path)
+	a.addFileInputs[1].SetValue("")
 	return a, nil
 }
 
@@ -1011,7 +1104,9 @@ func (a *App) runSync(fileID, syncType string, isAuto bool) tea.Cmd {
 			IsAuto:    isAuto,
 			StartedAt: time.Now(),
 		}
-		a.state = viewSyncResult
+		if !isAuto {
+			a.state = viewSyncResult
+		}
 		return syncStepMsg{}
 	}
 }

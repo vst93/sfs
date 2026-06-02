@@ -6,7 +6,7 @@
 
 <div align="center">
 
-A WebDAV-based terminal file sync tool
+A WebDAV-based file sync tool with terminal (TUI) and web interface
 
 **[English](#english)** · **[中文](#中文)**
 
@@ -33,7 +33,10 @@ A WebDAV-based terminal file sync tool
 
 ### Introduction
 
-SFS (SmallFileSync) is a terminal-based file sync tool built on [Bubble Tea](https://github.com/charmbracelet/bubbletea). It syncs individual files via WebDAV (Jianguoyun/Nutstore, etc.), designed for developers who need small files — configs, dotfiles, IDE settings — consistent across machines.
+SFS (SmallFileSync) is a file sync tool built on WebDAV, supporting both a **terminal TUI** ([Bubble Tea](https://github.com/charmbracelet/bubbletea)) and a **web interface**. It syncs individual files via WebDAV (Jianguoyun/Nutstore, etc.), designed for developers who need small files — configs, dotfiles, IDE settings — consistent across machines.
+
+- **Terminal mode (`sfs`)** — Interactive TUI in your terminal, full keyboard-driven workflow
+- **Web mode (`sfs web [port]`)** — Browser-based UI, auto-opens in your default browser
 
 ### Features
 
@@ -41,7 +44,8 @@ SFS (SmallFileSync) is a terminal-based file sync tool built on [Bubble Tea](htt
 - **MD5 Verification** — Integrity checks for lossless transfers
 - **Conflict Detection** — Smart detection with manual resolution
 - **Auto Sync** — Configurable automatic sync countdown
-- **i18n** — Switch Chinese/English with `L` key
+- **Dual Interface** — Terminal TUI + Web UI, choose your preferred workflow
+- **i18n** — Switch Chinese/English with `L` key (terminal) or browser language
 - **Data Migration** — Auto-migrates legacy uTools plugin data
 - **Platform** — Linux, macOS, Windows, Android (via Termux)
 
@@ -87,6 +91,8 @@ go build -o sfs
 
 ### Quick Start
 
+**Terminal mode (default):**
+
 ```bash
 sfs
 ```
@@ -95,6 +101,15 @@ sfs
 2. `e` — Set local sync directory
 3. `a` — Add files for syncing
 4. `Enter` — Smart sync (auto-detect direction), or `y` to sync all
+
+**Web mode:**
+
+```bash
+sfs web        # Start on default port 8080
+sfs web 3000   # Start on custom port
+```
+
+Then open the displayed URL in your browser to manage files via the web interface.
 
 ### Configuration
 
@@ -153,12 +168,28 @@ Config files stored in `~/.config/small-filesync/` (Linux), `~/Library/Applicati
 ### Architecture
 
 ```
-SFS TUI (Bubble Tea / Lipgloss)
-        │
-Sync Engine (Whole-file Transfer · MD5 Check · Conflict Detect)
-        │
-Storage Layer (WebDAV Remote + Local JSON State/Config)
+┌─────────────────────────────────┐
+│         SFS UI Layer            │
+│  ┌───────────┐ ┌─────────────┐  │
+│  │ Terminal   │ │ Web (SPA)   │  │
+│  │ TUI        │ │ HTTP Server │  │
+│  └─────┬─────┘ └──────┬──────┘  │
+│        └───────┬───────┘         │
+│          Sync Engine             │
+│  (Whole-file Transfer · MD5      │
+│   Check · Conflict Detect)       │
+│                │                 │
+│          Storage Layer           │
+│  (WebDAV Remote + Local JSON)    │
+└─────────────────────────────────┘
 ```
+
+**Run modes:**
+
+| Command | Mode | Description |
+|---------|------|-------------|
+| `sfs` | Terminal | Interactive TUI (Bubble Tea / Lipgloss) |
+| `sfs web [port]` | Web | Browser-based UI (default port 8080) |
 
 Remote storage layout:
 
@@ -203,7 +234,10 @@ MIT License © 2026 [vst](https://github.com/vst93)
 
 ### 项目介绍
 
-SFS (SmallFileSync) 是一款基于 WebDAV 的终端文件同步工具，使用 Go + [Bubble Tea](https://github.com/charmbracelet/bubbletea) 构建。支持坚果云等主流 WebDAV 服务，专为需要在多台机器间保持小文件（配置文件、dotfiles、IDE 设置）一致性的开发者设计。
+SFS (SmallFileSync) 是一款基于 WebDAV 的文件同步工具，使用 Go 构建，同时支持**终端 TUI**（[Bubble Tea](https://github.com/charmbracelet/bubbletea)）和 **Web 浏览器界面**。支持坚果云等主流 WebDAV 服务，专为需要在多台机器间保持小文件（配置文件、dotfiles、IDE 设置）一致性的开发者设计。
+
+- **终端模式 (`sfs`)** — 终端中的交互式 TUI，全键盘操作
+- **Web 模式 (`sfs web [port]`)** — 浏览器界面，启动后自动打开默认浏览器
 
 ### 功能特性
 
@@ -211,6 +245,7 @@ SFS (SmallFileSync) 是一款基于 WebDAV 的终端文件同步工具，使用 
 - **MD5 校验** — 完整性检查，确保无损传输
 - **冲突检测** — 智能识别冲突，支持手动解决
 - **自动同步** — 可配置的自动同步倒计时
+- **双界面** — 终端 TUI + Web 浏览器界面，自由选择使用方式
 - **国际化** — `L` 键一键切换中英文界面
 - **数据迁移** — 自动迁移旧版 uTools 插件数据
 - **多平台** — Linux、macOS、Windows、Android（通过 Termux）
@@ -257,6 +292,8 @@ go build -o sfs
 
 ### 快速开始
 
+**终端模式（默认）：**
+
 ```bash
 sfs
 ```
@@ -265,6 +302,15 @@ sfs
 2. `e` — 设置本地同步目录
 3. `a` — 添加需要同步的文件
 4. `Enter` — 智能同步（自动检测方向），或 `y` 同步全部
+
+**Web 模式：**
+
+```bash
+sfs web        # 使用默认端口 8080 启动
+sfs web 3000   # 指定自定义端口
+```
+
+启动后自动打开浏览器，通过 Web 界面管理文件同步。
 
 ### 配置说明
 
@@ -323,12 +369,28 @@ sfs
 ### 架构设计
 
 ```
-SFS TUI 界面 (Bubble Tea / Lipgloss)
-        │
-同步引擎 (整文件传输 · MD5 校验 · 冲突检测)
-        │
-存储层 (WebDAV 远程 + 本地 JSON 状态/配置)
+┌─────────────────────────────────┐
+│          SFS 界面层             │
+│  ┌───────────┐ ┌─────────────┐  │
+│  │ 终端 TUI  │ │ Web (SPA)   │  │
+│  │ Bubble Tea│ │ HTTP Server │  │
+│  └─────┬─────┘ └──────┬──────┘  │
+│        └───────┬───────┘         │
+│          同步引擎               │
+│  (整文件传输 · MD5 校验          │
+│   · 冲突检测)                   │
+│                │                 │
+│          存储层                 │
+│  (WebDAV 远程 + 本地 JSON)      │
+└─────────────────────────────────┘
 ```
+
+**运行模式：**
+
+| 命令 | 模式 | 说明 |
+|------|------|------|
+| `sfs` | 终端 | 交互式 TUI (Bubble Tea / Lipgloss) |
+| `sfs web [port]` | Web | 浏览器界面（默认端口 8080） |
 
 远程存储布局：
 

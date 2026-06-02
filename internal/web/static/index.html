@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SFS — SmallFileSync Web</title>
+    <style>
+:root {
+    --c-primary: #4A6CF7;
+    --c-primary-hover: #3B5EEE;
+    --c-success: #027a48;
+    --c-warning: #b54708;
+    --c-danger: #d92d20;
+    --c-muted: #667085;
+    --c-text: #1f2937;
+    --c-text-light: #344054;
+    --c-border: #d2d8e0;
+    --c-bg: #eef2f7;
+    --c-card: #ffffff;
+    --c-chip-bg: #f3f4f6;
+    --radius: 8px;
+}
+html, body { background: var(--c-bg); margin: 0; color: var(--c-text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; }
+body { min-height: 100vh; }
+* { box-sizing: border-box; }
+button, input { font: inherit; }
+.app-shell { padding: 10px; max-width: 1100px; margin: 0 auto; }
+.app-toolbar, .list-panel { border: 1px solid var(--c-border); border-radius: var(--radius); background: var(--c-card); box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04); }
+.app-toolbar { padding: 10px 12px 8px; }
+.toolbar-main { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.toolbar-title-wrap { min-width: 0; }
+.app-title { margin: 0; font-size: 16px; line-height: 1.2; }
+.toolbar-subtitle { margin: 2px 0 0; color: var(--c-muted); font-size: 12px; }
+.toolbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+.btn { border: 1px solid transparent; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--c-primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--c-primary-hover); }
+.btn-secondary { border-color: #d0d5dd; background: var(--c-card); color: var(--c-text-light); }
+.btn-secondary:hover:not(:disabled) { background: #f8fafc; }
+.btn-danger { background: var(--c-danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.toggle-field { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #d0d5dd; border-radius: 6px; background: var(--c-card); color: var(--c-text-light); font-size: 12px; font-weight: 600; cursor: pointer; }
+.toggle-field input { margin: 0; width: 12px; height: 12px; }
+.summary-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.summary-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: var(--c-chip-bg); color: #475467; font-size: 12px; }
+.summary-chip strong { color: #101828; }
+.summary-chip.success { background: #ecfdf3; color: var(--c-success); }
+.summary-chip.warning { background: #fffaeb; color: var(--c-warning); }
+.summary-chip.neutral { background: #f2f4f7; color: #475467; }
+.auto-sync-status { color: var(--c-muted); font-size: 11px; white-space: nowrap; }
+.list-panel { margin-top: 10px; overflow: hidden; }
+.table-wrap { overflow: auto; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid #eaecf0; vertical-align: top; }
+th { color: var(--c-muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+tr:hover td { background: #f5f7fa; }
+.file-meta-title { margin: 0; font-size: 12px; font-weight: 700; color: #101828; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta-note, .muted-text { margin-top: 2px; color: var(--c-muted); line-height: 1.3; font-size: 10px; }
+.path-text { max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--c-text-light); font-size: 10px; }
+.path-link { display: inline; padding: 0; border: none; background: transparent; text-align: left; cursor: pointer; color: var(--c-text-light); font-size: 10px; font-family: inherit; }
+.path-link:hover { color: #4f46e5; text-decoration: underline; }
+.path-link::after { content: ' ⧉'; font-size: 8px; opacity: 0; transition: opacity .15s; }
+.path-link:hover::after { opacity: 0.6; }
+.info-cell { min-width: 170px; }
+.status-badge { display: inline-flex; align-items: center; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+.status-success { background: #ecfdf3; color: var(--c-success); }
+.status-warning { background: #fffaeb; color: var(--c-warning); }
+.status-danger { background: #fef3f2; color: var(--c-danger); }
+.status-neutral { background: #f2f4f7; color: #475467; }
+.table-actions { display: flex; flex-wrap: wrap; gap: 4px; min-width: 138px; }
+.action-btn { border: 1px solid #d0d5dd; border-radius: 4px; background: var(--c-card); color: var(--c-text-light); padding: 4px 6px; font-size: 10px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; line-height: 1; }
+.action-btn:hover:not(:disabled) { background: #f8fafc; }
+.action-btn:disabled { opacity: .55; cursor: not-allowed; }
+.action-btn-primary { border-color: #c7d2fe; background: #eef2ff; color: #4f46e5; }
+.action-btn-primary:hover:not(:disabled) { background: #dde4fd; }
+.action-btn-muted { color: #475467; background: #f8fafc; }
+.action-btn-danger { color: #b42318; border-color: #fecdca; background: #fff5f4; }
+.action-btn-danger:hover:not(:disabled) { background: #fee4e2; }
+.compact-empty { margin: 10px; padding: 28px 16px; text-align: center; border: 1px dashed #d0d5dd; border-radius: var(--radius); background: #f8fafc; }
+.empty-state-icon { width: 42px; height: 42px; margin: 0 auto 10px; border-radius: 6px; background: #dbeafe; color: var(--c-primary); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+.empty-state h3 { margin: 0; font-size: 16px; }
+.empty-state p { margin: 6px 0 16px; color: var(--c-muted); font-size: 12px; }
+/* Modal */
+.modal-mask { display: none; position: fixed; inset: 0; z-index: 50; padding: 16px; background: rgba(15,23,42,.35); }
+.modal-panel { width: min(560px, 100%); margin: 18px auto; max-height: calc(100vh - 68px); display: flex; flex-direction: column; border-radius: var(--radius); background: var(--c-card); border: 1px solid #e4e7ec; box-shadow: 0 2px 8px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.12); }
+.modal-panel-log { width: min(640px, 100%); }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 16px 8px; flex-shrink: 0; background: var(--c-card); border-bottom: 1px solid #eaecf0; border-radius: var(--radius) var(--radius) 0 0; }
+.modal-body { overflow-y: auto; flex: 1; min-height: 0; padding: 16px; }
+.modal-header h3 { margin: 0; font-size: 14px; }
+.modal-header p { margin: 3px 0 0; color: var(--c-muted); font-size: 11px; line-height: 1.4; }
+.icon-btn { width: 32px; height: 32px; border: none; border-radius: 6px; background: #f2f4f7; color: var(--c-text-light); font-size: 18px; line-height: 1; cursor: pointer; }
+.form-field + .form-field { margin-top: 14px; }
+.form-field label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: var(--c-text-light); }
+.text-input { width: 100%; border: 1px solid #d0d5dd; border-radius: 6px; padding: 10px 12px; background: var(--c-card); color: #101828; font-size: 12px; }
+.text-input:focus { outline: none; border-color: #8b9cf7; box-shadow: 0 0 0 2px rgba(74,108,247,.2); }
+.password-input-wrap { position: relative; }
+.password-input { padding-right: 48px; }
+.password-toggle-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--c-muted); padding: 4px; border-radius: 4px; line-height: 1; }
+.password-toggle-btn:hover { color: var(--c-text-light); background: #f2f4f7; }
+.form-help { margin: 8px 0 0; color: var(--c-muted); font-size: 11px; }
+.form-help-warning { color: var(--c-warning); }
+.form-help-success { color: var(--c-success); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.storage-settings-actions { justify-content: space-between; flex-wrap: wrap; }
+.storage-settings-actions .btn { min-width: 96px; }
+/* Info board */
+.info-board-text { padding: 16px; color: #101828; line-height: 1.65; }
+.sync-result-head { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.result-pill { padding: 5px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #f2f4f7; color: var(--c-text-light); }
+.result-pill-success { background: #ecfdf3; color: var(--c-success); }
+.result-pill-danger { background: #fef3f2; color: var(--c-danger); }
+.sync-detail-list { display: flex; flex-direction: column; gap: 6px; }
+.sync-detail-empty { padding: 24px 12px; text-align: center; font-size: 12px; color: #98a2b3; }
+.sync-detail-item { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid #e4e7ec; border-radius: 6px; background: var(--c-card); font-size: 12px; line-height: 1.5; }
+.sync-detail-item-fail { color: #f04438; background: #fef3f2; border-color: #fecdca; }
+.sync-detail-main { font-weight: 700; color: #101828; flex-shrink: 0; }
+.sync-detail-action { color: var(--c-muted); flex-shrink: 0; }
+.sync-detail-reason { color: var(--c-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.result-badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #f2f4f7; color: var(--c-text-light); flex-shrink: 0; }
+.result-badge-ok { background: #ecfdf3; color: var(--c-success); }
+.result-badge-fail { background: #fef3f2; color: var(--c-danger); }
+/* Confirm */
+.confirm-mask { z-index: 60; }
+.confirm-panel { width: min(420px, 100%); }
+.confirm-body { padding: 0 16px; }
+.confirm-hint { padding: 10px 12px; border-radius: 6px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 11px; line-height: 1.5; }
+.confirm-actions { padding: 14px 16px 16px; margin-top: 14px; border-top: 1px solid #eaecf0; }
+/* Toast */
+.toast-stack { position: fixed; top: 14px; left: 14px; z-index: 70; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: 360px; }
+.toast { padding: 10px 14px; border-radius: 8px; border: 1px solid #e4e7ec; background: var(--c-card); color: #101828; box-shadow: 0 8px 20px rgba(15,23,42,.12); font-size: 12px; line-height: 1.45; pointer-events: auto; }
+.toast-success { border-color: #abefc6; background: #ecfdf3; }
+.toast-warning { border-color: #fedf89; background: #fffaeb; }
+.toast-error { border-color: #fecdca; background: #fef3f2; }
+.sync-progress { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e4e7ec; font-size: 12px; color: var(--c-text-light); }
+.sync-progress-spinner { width: 16px; height: 16px; border: 2px solid #e4e7ec; border-top-color: #4a6cf7; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 720px) { .toolbar-main { flex-direction: column; align-items: stretch; } .toolbar-actions { width: 100%; } }
+body.drag-over::after { content: '松开即可添加文件'; position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(74,108,247,.08); border: 3px dashed var(--c-primary); margin: 12px; border-radius: 12px; font-size: 18px; font-weight: 700; color: var(--c-primary); pointer-events: none; }
+    </style>
+</head>
+<body>
+<div class="app-shell" id="appShell">
+    <header class="app-toolbar">
+        <div class="toolbar-main">
+            <div class="toolbar-title-wrap">
+                <h1 class="app-title">smallFileSync</h1>
+                <p class="toolbar-subtitle">拖入即加，轻量同步</p>
+            </div>
+            <div class="toolbar-actions">
+                <button id="addFileBtn" type="button" class="btn btn-primary" title="添加本地文件到同步列表"><span>⊕</span><span>添加</span></button>
+                <button id="syncAllBtn" type="button" class="btn btn-secondary" title="同步全部文件"><span>⟳</span><span>同步全部</span></button>
+                <button id="storageSettingsBtn" type="button" class="btn btn-secondary" title="配置存储设置"><span>存储设置</span></button>
+                <label class="toggle-field" for="autoSyncBtn" title="开启后每60秒自动同步">
+                    <input type="checkbox" id="autoSyncBtn"><span>自动</span>
+                </label>
+            </div>
+        </div>
+        <div class="summary-strip" id="summaryGrid">
+            <span class="summary-chip">总数 <strong id="summaryTotal">0</strong></span>
+            <span class="summary-chip success">一致 <strong id="summaryMatched">0</strong></span>
+            <span class="summary-chip warning">待处理 <strong id="summaryPending">0</strong></span>
+            <span class="summary-chip neutral">未关联 <strong id="summaryUnbound">0</strong></span>
+            <span class="auto-sync-status" id="autoSyncStatus"></span>
+        </div>
+    </header>
+    <section class="list-panel">
+        <div class="compact-empty" id="emptyState">
+            <div class="empty-state-icon">＋</div>
+            <h3>还没有同步文件</h3>
+            <p>添加一个文件后即可开始同步。</p>
+            <button type="button" class="btn btn-primary" id="emptyStateBtn">立即添加</button>
+        </div>
+        <div class="table-wrap" id="tableWrap" style="display:none">
+            <table class="file-list"><thead><tr><th>文件</th><th>状态</th><th>信息</th><th>操作</th></tr></thead><tbody id="fileListBody"></tbody></table>
+        </div>
+    </section>
+</div>
+
+<!-- Add File Modal -->
+<div id="addFileBg" class="modal-mask">
+    <div class="modal-panel">
+        <div class="modal-header"><div><h3>添加同步文件</h3><p>输入本地完整路径，单文件不能超过 200MB。</p></div><button type="button" class="icon-btn" id="addFileClose">×</button></div>
+        <div class="modal-body">
+            <div class="form-field"><label>文件路径</label><input type="text" id="addFilePath" class="text-input" placeholder="例如：/Users/name/config.json"></div>
+            <div class="form-field"><label>文件备注</label><input type="text" id="addFileNote" class="text-input" placeholder="可选备注（50字以内）" maxlength="50"></div>
+            <div id="addFileFeedback" class="form-help" style="display:none"></div>
+            <div class="modal-actions"><button type="button" class="btn btn-primary" id="addFileSubmit">添加</button><button type="button" class="btn btn-secondary" id="addFileCancel">取消</button></div>
+        </div>
+    </div>
+</div>
+
+<!-- Storage Settings Modal -->
+<div id="storageBg" class="modal-mask">
+    <div class="modal-panel">
+        <div class="modal-header"><div><h3>存储设置</h3><p>配置 WebDAV 连接信息以启用远程同步。</p></div><button type="button" class="icon-btn" id="storageClose">×</button></div>
+        <div class="modal-body">
+            <div class="form-field"><label for="wEndpoint">WebDAV 地址</label><input type="text" id="wEndpoint" class="text-input" placeholder="例如：https://dav.jianguoyun.com/dav"></div>
+            <div class="form-field"><label for="wUsername">用户名</label><input type="text" id="wUsername" class="text-input" placeholder="坚果云用户名"></div>
+            <div class="form-field"><label for="wPassword">密码 / 应用密码</label><div class="password-input-wrap"><input type="password" id="wPassword" class="text-input password-input" placeholder="建议使用应用密码"><button type="button" class="password-toggle-btn" id="pwdToggle" title="显示密码"><svg class="eye-open" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-closed" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg></button></div></div>
+            <div class="form-field"><label for="wBasePath">远端目录</label><input type="text" id="wBasePath" class="text-input" placeholder="留空则使用 small-file-sync"><p class="form-help">留空默认 <code>small-file-sync</code>；填 <code>/</code> 表示根目录。</p></div>
+            <div id="storageFeedback" class="form-help" style="display:none"></div>
+            <div class="modal-actions storage-settings-actions">
+                <button type="button" class="btn btn-secondary" id="testConnBtn">测试连接</button>
+                <div style="display:flex;gap:10px"><button type="button" class="btn btn-primary" id="saveStorageBtn">保存配置</button><button type="button" class="btn btn-secondary" id="storageCancel">取消</button></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sync Result Modal -->
+<div id="syncResultBg" class="modal-mask">
+    <div class="modal-panel modal-panel-log">
+        <div class="modal-header"><div><h3>同步结果</h3><p id="syncResultSummary" class="muted-text">查看本次同步的处理结果。</p></div><button type="button" class="icon-btn" id="syncResultClose">×</button></div>
+        <div class="modal-body">
+            <div class="sync-progress" id="syncProgress" style="display:none"><div class="sync-progress-spinner"></div><div id="syncProgressText">正在同步...</div></div>
+            <div id="syncResultContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Modal -->
+<div id="confirmBg" class="modal-mask confirm-mask">
+    <div class="confirm-panel modal-panel">
+        <div class="modal-header"><div><h3 id="confirmTitle">请确认操作</h3><p id="confirmMessage"></p></div></div>
+        <div class="modal-body">
+            <div class="confirm-body"><div class="confirm-hint">此操作会立即生效，请确认目标与方向无误。</div></div>
+            <div class="confirm-actions"><button type="button" class="btn btn-secondary" id="confirmCancel">取消</button><button type="button" class="btn btn-danger" id="confirmOk">确认</button></div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+let fileList = []
+let appSettings = null
+let syncing = false
+let autoSyncCountdown = 60
+let confirmResolve = null
+let modalOpen = false   // track if any modal is open to prevent double-trigger
+
+// ── API helpers ───────────────────────────────────────────────────────────
+async function api(path, opts) {
+    const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Request failed')
+    return data
+}
+
+// ── Clipboard ─────────────────────────────────────────────────────────────
+async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text)
+        return true
+    } catch (e) {
+        // Fallback for non-HTTPS or older browsers
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0'
+        document.body.appendChild(ta)
+        ta.select()
+        const ok = document.execCommand('copy')
+        ta.remove()
+        return ok
+    }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function showToast(message, type) {
+    const toast = document.createElement('div')
+    toast.className = 'toast toast-' + (type || 'success')
+    toast.textContent = message
+    document.getElementById('toastStack').appendChild(toast)
+    setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity .18s'; setTimeout(() => toast.remove(), 200) }, 2400)
+}
+
+// ── Escape HTML ───────────────────────────────────────────────────────────
+function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '' }
+
+// ── Time format ───────────────────────────────────────────────────────────
+function fmtTime(ts) {
+    if (!ts) return ''
+    const d = new Date(ts)
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
+}
+
+function fmtSize(kb) {
+    if (!kb) return '--'
+    return kb >= 1024 ? (kb/1024).toFixed(1) + ' M' : Math.round(kb) + ' KB'
+}
+
+// ── Status helpers ────────────────────────────────────────────────────────
+function statusBadge(status) {
+    const map = {
+        matched:        { cls: 'status-success', text: '已同步' },
+        pending_upload: { cls: 'status-warning', text: '待上传' },
+        download:       { cls: 'status-warning', text: '待下载' },
+        initial_upload: { cls: 'status-warning', text: '首次上传' },
+        missing:        { cls: 'status-danger',  text: '本地缺失' },
+        conflict:       { cls: 'status-danger',  text: '冲突' },
+        unbound:        { cls: 'status-neutral', text: '未关联' },
+    }
+    const s = map[status] || { cls: 'status-neutral', text: status }
+    return '<span class="status-badge ' + s.cls + '">' + esc(s.text) + '</span>'
+}
+
+function escapeAttr(s) { return esc(s) }
+
+function primaryAction(item) {
+    const id = escapeAttr(item.id)
+    if (item.status === 'unbound')
+        return '<button class="action-btn action-btn-primary" data-action="setDir" data-id="' + id + '">目录</button>'
+    if (item.status === 'initial_upload')
+        return '<button class="action-btn action-btn-primary" data-action="sync" data-id="' + id + '" data-sync="force_upload">上传</button>'
+    if (item.status === 'matched')
+        return '<button class="action-btn" data-action="sync" data-id="' + id + '" data-sync="force_download">拉取</button>'
+    if (item.status === 'download' || item.status === 'missing')
+        return '<button class="action-btn action-btn-primary" data-action="sync" data-id="' + id + '" data-sync="force_download">下载</button>'
+    if (item.status === 'conflict')
+        return '<button class="action-btn action-btn-primary" data-action="sync" data-id="' + id + '" data-sync="force_upload">上传</button>'
+    return '<button class="action-btn action-btn-primary" data-action="sync" data-id="' + id + '" data-sync="force_upload">上传</button>'
+}
+
+function secondaryAction(item) {
+    const id = escapeAttr(item.id)
+    if (item.status === 'unbound')
+        return '<button class="action-btn action-btn-muted" data-action="delete" data-id="' + id + '">删除</button>'
+    if (item.status === 'conflict')
+        return '<button class="action-btn action-btn-muted" data-action="sync" data-id="' + id + '" data-sync="force_download">下载</button>'
+    return '<button class="action-btn action-btn-muted" data-action="setDir" data-id="' + id + '">目录</button>'
+}
+
+function dangerAction(item) {
+    if (item.status === 'unbound') return ''
+    const id = escapeAttr(item.id)
+    return '<button class="action-btn action-btn-danger" data-action="delete" data-id="' + id + '">删除</button>'
+}
+
+// ── Show list ─────────────────────────────────────────────────────────────
+function showList() {
+    const body = document.getElementById('fileListBody')
+    const empty = document.getElementById('emptyState')
+    const wrap = document.getElementById('tableWrap')
+
+    let html = ''
+    let summary = { total: 0, matched: 0, pending: 0, unbound: 0 }
+
+    for (const item of fileList) {
+        summary.total++
+        if (item.status === 'matched') summary.matched++
+        else if (item.status === 'unbound') { summary.unbound++; summary.pending++ }
+        else summary.pending++
+
+        const note = item.note ? esc(item.note) : '<span class="muted-text">暂无备注</span>'
+        const syncTime = item.lastUploadTime ? fmtTime(item.lastUploadTime) : '尚未同步'
+        const fileSize = fmtSize(item.size)
+        const host = item.lastUploadUser ? esc(item.lastUploadUser) : '--'
+        const localPath = item.localPath || ''
+        const pathHtml = localPath
+            ? '<button class="path-link muted-text path-text" data-action="copyPath" data-path="' + esc(localPath) + '" title="点击复制路径">' + esc(localPath) + '</button>'
+            : '<span class="muted-text path-text">未设置目录</span>'
+
+        html += '<tr>'
+            + '<td><div class="file-meta-title" title="' + esc(item.fileName) + '">' + esc(item.fileName) + '</div><div class="file-meta-note">' + note + '</div></td>'
+            + '<td>' + statusBadge(item.status) + '<div class="muted-text">' + esc(item.statusDetail) + '</div></td>'
+            + '<td class="info-cell"><div>' + syncTime + '</div><div class="muted-text">' + fileSize + ' · ' + host + '</div>' + pathHtml + '</td>'
+            + '<td><div class="table-actions">' + primaryAction(item) + secondaryAction(item) + dangerAction(item) + '</div></td>'
+            + '</tr>'
+    }
+    body.innerHTML = html
+
+    document.getElementById('summaryTotal').textContent = summary.total
+    document.getElementById('summaryMatched').textContent = summary.matched
+    document.getElementById('summaryPending').textContent = summary.pending
+    document.getElementById('summaryUnbound').textContent = summary.unbound
+
+    if (summary.total === 0) {
+        empty.style.display = ''
+        wrap.style.display = 'none'
+    } else {
+        empty.style.display = 'none'
+        wrap.style.display = ''
+    }
+}
+
+// ── Delegated table click handler ─────────────────────────────────────────
+document.getElementById('fileListBody').addEventListener('click', async function(e) {
+    const btn = e.target.closest('[data-action]')
+    if (!btn) return
+    e.preventDefault()
+    e.stopPropagation()
+    const action = btn.getAttribute('data-action')
+    if (action === 'copyPath') {
+        const path = btn.getAttribute('data-path')
+        if (path) {
+            const ok = await copyText(path)
+            showToast(ok ? '路径已复制' : '复制失败', ok ? 'success' : 'error')
+        }
+        return
+    }
+    const id = btn.getAttribute('data-id')
+    if (action === 'delete') {
+        await doDeleteFile(id)
+    } else if (action === 'setDir') {
+        await doSetDir(id)
+    } else if (action === 'sync') {
+        const syncType = btn.getAttribute('data-sync') || ''
+        await doSyncSingle(id, syncType)
+    }
+})
+
+// ── Load state ────────────────────────────────────────────────────────────
+async function loadState() {
+    try {
+        const data = await api('/files')
+        fileList = data.files || []
+        showList()
+    } catch (e) {
+        console.error(e)
+    }
+    try {
+        const data = await api('/settings')
+        appSettings = data.settings
+        document.getElementById('autoSyncBtn').checked = appSettings.autoSync || false
+        fillStorageForm()
+    } catch (e) {
+        console.error(e)
+    }
+}
+
+// ── Storage settings ──────────────────────────────────────────────────────
+function fillStorageForm() {
+    const w = appSettings && appSettings.storage ? appSettings.storage.webdav : {}
+    document.getElementById('wEndpoint').value = w.endpoint || ''
+    document.getElementById('wUsername').value = w.username || ''
+    document.getElementById('wPassword').value = w.password || ''
+    document.getElementById('wBasePath').value = w.basePath || 'small-file-sync'
+}
+
+function collectStorageForm() {
+    return {
+        autoSync: document.getElementById('autoSyncBtn').checked,
+        storage: {
+            type: 'webdav',
+            webdav: {
+                endpoint: document.getElementById('wEndpoint').value.trim(),
+                username: document.getElementById('wUsername').value.trim(),
+                password: document.getElementById('wPassword').value,
+                basePath: document.getElementById('wBasePath').value.trim(),
+            }
+        }
+    }
+}
+
+function showStorageFeedback(msg, type) {
+    const el = document.getElementById('storageFeedback')
+    el.style.display = msg ? '' : 'none'
+    el.textContent = msg
+    el.className = 'form-help ' + (type === 'error' ? 'form-help-warning' : type === 'success' ? 'form-help-success' : '')
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+async function doAddFile() {
+    const path = document.getElementById('addFilePath').value.trim()
+    const note = document.getElementById('addFileNote').value.trim()
+    if (!path) { showToast('请输入文件路径', 'warning'); return }
+    try {
+        await api('/files/add', { method: 'POST', body: JSON.stringify({ filePath: path, note }) })
+        showToast('文件已添加', 'success')
+        closeModal('addFileBg')
+        await loadState()
+    } catch (e) { showToast(e.message, 'error') }
+}
+
+async function doDeleteFile(id) {
+    document.getElementById('confirmTitle').textContent = '确认删除同步记录'
+    document.getElementById('confirmMessage').textContent = '将删除云端保存的同步内容与记录，本地文件不会删除。'
+    document.getElementById('confirmOk').textContent = '删除记录'
+    openModal('confirmBg')
+    const ok = await new Promise(r => { confirmResolve = r })
+    if (!ok) return
+    try {
+        await api('/files/delete', { method: 'POST', body: JSON.stringify({ id }) })
+        showToast('文件已删除', 'success')
+        await loadState()
+    } catch (e) { showToast(e.message, 'error') }
+}
+
+async function doSetDir(id) {
+    const dir = prompt('请输入本地目录路径：')
+    if (!dir) return
+    try {
+        await api('/files/dir', { method: 'POST', body: JSON.stringify({ id, dir }) })
+        showToast('目录已设置', 'success')
+        await loadState()
+    } catch (e) { showToast(e.message, 'error') }
+}
+
+async function doSyncSingle(id, syncType) {
+    if (syncing) { showToast('同步进行中，请稍候', 'warning'); return }
+    syncing = true
+    showSyncProgress('准备中...')
+    try {
+        const result = await api('/sync/single', { method: 'POST', body: JSON.stringify({ id, syncType }) })
+        const summary = { checked: 1, uploaded: 0, downloaded: 0, skipped: 0, failed: 0, unbound: 0 }
+        if (result.status === '成功') {
+            if (result.action === '上传') summary.uploaded++
+            else if (result.action === '下载') summary.downloaded++
+            else if (result.action === '跳过') summary.skipped++
+        } else {
+            summary.failed++
+        }
+        renderSyncResult({ summary: summary, details: [result] })
+    } catch (e) {
+        renderSyncResult({ summary: { checked: 1, uploaded: 0, downloaded: 0, skipped: 0, failed: 1, unbound: 0 }, details: [{ fileName: '-', action: '同步', status: '失败', reason: e.message }] })
+    }
+    syncing = false
+    hideSyncProgress()
+    await loadState()
+}
+
+async function doSyncAll() {
+    if (syncing) { showToast('同步进行中，请稍候', 'warning'); return }
+    syncing = true
+    showSyncProgress('正在同步全部...')
+    try {
+        const result = await api('/sync', { method: 'POST', body: JSON.stringify({ syncType: '', isAuto: false }) })
+        renderSyncResult(result)
+    } catch (e) {
+        showToast(e.message, 'error')
+    }
+    syncing = false
+    hideSyncProgress()
+    await loadState()
+}
+
+// ── Sync result rendering ─────────────────────────────────────────────────
+function renderSyncResult(result) {
+    const s = result.summary
+    const pill = (label, count, cls) => count > 0 ? '<span class="result-pill ' + (cls||'') + '">' + label + ' ' + count + '</span>' : ''
+    let html = '<div class="sync-result-head">'
+        + pill('检查', s.checked)
+        + pill('上传', s.uploaded, 'result-pill-success')
+        + pill('下载', s.downloaded, 'result-pill-success')
+        + pill('跳过', s.skipped)
+        + pill('失败', s.failed, 'result-pill-danger')
+        + pill('未关联', s.unbound)
+        + '</div>'
+
+    if (!result.details || result.details.length === 0) {
+        html += '<div class="sync-detail-empty">无需处理。</div>'
+    } else {
+        html += '<div class="sync-detail-list">'
+        const sorted = result.details.slice().sort((a,b) => (a.status==='失败'?0:1) - (b.status==='失败'?0:1))
+        for (const d of sorted) {
+            const badge = d.status === '成功' ? '<span class="result-badge result-badge-ok">成功</span>'
+                : d.status === '失败' ? '<span class="result-badge result-badge-fail">失败</span>'
+                : '<span class="result-badge">' + esc(d.status) + '</span>'
+            const cls = d.status === '失败' ? ' sync-detail-item-fail' : ''
+            html += '<div class="sync-detail-item' + cls + '"><span class="sync-detail-main">' + esc(d.fileName) + '</span> · <span class="sync-detail-action">' + esc(d.action) + '</span>' + badge + ' <span class="sync-detail-reason">' + esc(d.reason) + '</span></div>'
+        }
+        html += '</div>'
+    }
+    document.getElementById('syncResultContent').innerHTML = html
+    document.getElementById('syncResultSummary').textContent = '本次同步处理结果'
+    openModal('syncResultBg')
+}
+
+function showSyncProgress(text) {
+    document.getElementById('syncProgressText').textContent = text
+    document.getElementById('syncProgress').style.display = ''
+    document.getElementById('syncResultContent').innerHTML = ''
+    openModal('syncResultBg')
+}
+function hideSyncProgress() { document.getElementById('syncProgress').style.display = 'none' }
+
+// ── Modal helpers ─────────────────────────────────────────────────────────
+function openModal(id) {
+    document.getElementById(id).style.display = 'block'
+    modalOpen = true
+}
+function closeModal(id) {
+    document.getElementById(id).style.display = 'none'
+    modalOpen = !!document.querySelector('.modal-mask:not([style*="none"])')
+}
+
+// ── Confirm ───────────────────────────────────────────────────────────────
+document.getElementById('confirmOk').addEventListener('click', function() {
+    closeModal('confirmBg')
+    if (confirmResolve) { confirmResolve(true); confirmResolve = null }
+})
+document.getElementById('confirmCancel').addEventListener('click', function() {
+    closeModal('confirmBg')
+    if (confirmResolve) { confirmResolve(false); confirmResolve = null }
+})
+// Dismiss confirm on mask click
+document.getElementById('confirmBg').addEventListener('click', function(e) {
+    if (e.target === e.currentTarget) {
+        closeModal('confirmBg')
+        if (confirmResolve) { confirmResolve(false); confirmResolve = null }
+    }
+})
+
+// ── Auto sync ─────────────────────────────────────────────────────────────
+setInterval(() => {
+    autoSyncCountdown--
+    if (autoSyncCountdown <= 0) {
+        autoSyncCountdown = 60
+        if (appSettings && appSettings.autoSync && !syncing) {
+            api('/sync', { method: 'POST', body: JSON.stringify({ syncType: '', isAuto: true }) }).then(r => {
+                if (r.summary && r.summary.failed > 0) showToast('自动同步存在失败项', 'warning')
+                loadState()
+            }).catch(e => console.error(e))
+        }
+    }
+    const status = document.getElementById('autoSyncStatus')
+    if (appSettings && appSettings.autoSync) {
+        status.textContent = autoSyncCountdown + '秒后同步'
+    } else {
+        status.textContent = ''
+    }
+}, 1000)
+
+// ── Event binding ─────────────────────────────────────────────────────────
+document.getElementById('addFileBtn').addEventListener('click', function() {
+    document.getElementById('addFilePath').value = ''
+    document.getElementById('addFileNote').value = ''
+    document.getElementById('addFileFeedback').style.display = 'none'
+    openModal('addFileBg')
+})
+document.getElementById('addFileClose').addEventListener('click', function() { closeModal('addFileBg') })
+document.getElementById('addFileCancel').addEventListener('click', function() { closeModal('addFileBg') })
+document.getElementById('addFileSubmit').addEventListener('click', function() { doAddFile() })
+document.getElementById('addFileBg').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal('addFileBg') })
+
+document.getElementById('emptyStateBtn').addEventListener('click', function() { document.getElementById('addFileBtn').click() })
+
+document.getElementById('syncAllBtn').addEventListener('click', function() { doSyncAll() })
+
+document.getElementById('storageSettingsBtn').addEventListener('click', function() {
+    fillStorageForm(); showStorageFeedback('', ''); openModal('storageBg')
+})
+document.getElementById('storageClose').addEventListener('click', function() { closeModal('storageBg') })
+document.getElementById('storageCancel').addEventListener('click', function() { closeModal('storageBg') })
+document.getElementById('storageBg').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal('storageBg') })
+document.getElementById('saveStorageBtn').addEventListener('click', async function() {
+    const data = collectStorageForm()
+    if (!data.storage.webdav.endpoint || !data.storage.webdav.username || !data.storage.webdav.password) {
+        showStorageFeedback('WebDAV 需要填写地址、用户名和密码', 'error'); return
+    }
+    try {
+        await api('/settings', { method: 'POST', body: JSON.stringify(data) })
+        appSettings = data
+        showToast('存储设置已保存', 'success')
+        closeModal('storageBg')
+        await loadState()
+    } catch (e) { showStorageFeedback(e.message, 'error') }
+})
+document.getElementById('testConnBtn').addEventListener('click', async function() {
+    const w = collectStorageForm().storage.webdav
+    if (!w.endpoint || !w.username || !w.password) { showStorageFeedback('请先填写完整信息', 'error'); return }
+    try {
+        const r = await api('/settings/test', { method: 'POST', body: JSON.stringify(w) })
+        showStorageFeedback(r.message, r.success ? 'success' : 'error')
+    } catch (e) { showStorageFeedback(e.message, 'error') }
+})
+document.getElementById('pwdToggle').addEventListener('click', function() {
+    const input = document.getElementById('wPassword')
+    const isPassword = input.type === 'password'
+    input.type = isPassword ? 'text' : 'password'
+    this.querySelector('.eye-open').style.display = isPassword ? 'none' : ''
+    this.querySelector('.eye-closed').style.display = isPassword ? '' : 'none'
+    this.title = isPassword ? '隐藏密码' : '显示密码'
+})
+
+document.getElementById('syncResultClose').addEventListener('click', function() { closeModal('syncResultBg') })
+document.getElementById('syncResultBg').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal('syncResultBg') })
+
+document.getElementById('autoSyncBtn').addEventListener('change', async function() {
+    const checked = this.checked
+    try {
+        const data = await api('/settings')
+        data.settings.autoSync = checked
+        await api('/settings', { method: 'POST', body: JSON.stringify(data.settings) })
+        appSettings = data.settings
+        showToast(checked ? '已开启自动同步' : '已关闭自动同步', checked ? 'success' : 'warning')
+        if (checked) autoSyncCountdown = 60
+    } catch (e) { this.checked = !checked; showToast('保存设置失败', 'error') }
+})
+
+// ── Drag & Drop (capture phase, before browser default) ────────────────────
+var dragCounter = 0
+function stopDrag(e) { e.preventDefault(); e.stopPropagation() }
+document.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy' }, true)
+document.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); dragCounter++; document.body.classList.add('drag-over') }, true)
+document.addEventListener('dragleave', function(e) { e.preventDefault(); e.stopPropagation(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; document.body.classList.remove('drag-over') } }, true)
+document.addEventListener('drop', function(e) {
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
+    dragCounter = 0
+    document.body.classList.remove('drag-over')
+    var files = e.dataTransfer && e.dataTransfer.files
+    if (!files || files.length === 0) return
+    var file = files[0]
+    var name = file.name || ''
+    var size = file.size || 0
+    if (size > 200 * 1024 * 1024) { showToast('文件大于200MB，不支持同步', 'warning'); return }
+    document.getElementById('addFilePath').value = ''
+    document.getElementById('addFileNote').value = ''
+    var fb = document.getElementById('addFileFeedback')
+    fb.style.display = ''
+    fb.className = 'form-help form-help-warning'
+    fb.textContent = '浏览器安全限制无法获取完整路径，请粘贴「' + name + '」的完整本地路径（例如：/Users/xxx/.../' + name + '）'
+    openModal('addFileBg')
+    document.getElementById('addFilePath').focus()
+}, true)
+
+// ── Init ──────────────────────────────────────────────────────────────────
+showList()
+loadState()
+setInterval(loadState, 15000)
+</script>
+</body>
+</html>

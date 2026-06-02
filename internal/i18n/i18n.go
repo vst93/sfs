@@ -143,8 +143,14 @@ var translations = map[Locale]map[string]string{
 		"file_list.stats.matched":  "● 一致 %d",
 		"file_list.stats.pending":  "● 待处理 %d",
 		"file_list.stats.unbound":  "● 未关联 %d",
+		"file_list.stats.matched_short": "一致 %d",
+		"file_list.stats.pending_short": "待处理 %d",
+		"file_list.stats.unbound_short": "未关联 %d",
 		"file_list.page_indicator": "  第 %d/%d 页",
 		"file_list.no_dir":         "(未关联目录)",
+		"file_list.auto_sync_on":   "自动同步",
+		"file_list.syncing":        "⟳ 同步中...",
+		"file_list.last_sync":      "上次同步",
 
 		// ── Empty state ─────────────────────────────────────────────────────
 		"empty.no_storage": "  尚未配置存储服务",
@@ -152,6 +158,7 @@ var translations = map[Locale]map[string]string{
 		"empty.configure":  " 配置 WebDAV 连接",
 		"empty.no_files":   "  当前没有同步文件",
 		"empty.add_hint":   " 添加文件到同步列表",
+		"empty.drag_hint":  "  也可以直接将文件拖入窗口",
 
 		// ── Bottom bar ──────────────────────────────────────────────────────
 		"bottom.storage_unconfigured": "未配置",
@@ -179,9 +186,9 @@ var translations = map[Locale]map[string]string{
 		"add_file.label.note":         "备注",
 		"add_file.placeholder.path":   "文件路径（拖入或手动输入）",
 		"add_file.placeholder.note":   "备注（可选）",
-		"add_file.path_valid":         "✔ %s  %.1fKB",
+		"add_file.path_valid":         "✔ %s  %s",
 		"add_file.path_invalid":       "✕ 路径不可达",
-		"add_file.hint":               "  Tab 切换  Enter 确认  Ctrl+Y 复制  Esc 返回",
+		"add_file.hint":               "  Tab 切换  Enter 确认  Ctrl+Y 复制  Esc 返回  也可直接拖入文件",
 		"add_file.error.invalid_path": "请输入有效的本地文件路径",
 		"add_file.error.is_dir":       "不支持添加目录，请选择文件",
 		"add_file.error.too_large":    "文件大于200MB，不支持同步",
@@ -275,11 +282,18 @@ var translations = map[Locale]map[string]string{
 		"refreshing":         "正在刷新...",
 		"auto_sync.enabled":  "已开启自动同步",
 		"auto_sync.disabled": "已关闭自动同步",
+		"auto_sync.done":     "自动同步完成",
+		"auto_sync.no_change": "自动同步完成，无需变更",
 
 		// ── Warn messages ───────────────────────────────────────────────────
 		"warn.configure_storage":   "请先配置存储设置",
 		"warn.configure_storage_s": "请先按 's' 配置存储设置",
 		"warn.sync_in_progress":    "同步进行中，请等待完成",
+		// ── Paste (drag-and-drop) ─────────────────────────────────────────────
+		"paste.invalid_path": "路径不可达: %s",
+		"paste.is_dir":       "不支持添加目录，请拖入文件",
+		"paste.too_large":    "文件大于200MB，不支持同步",
+
 
 		// ── Delete ──────────────────────────────────────────────────────────
 		"delete.not_found": "未找到需要删除的记录",
@@ -407,8 +421,14 @@ var translations = map[Locale]map[string]string{
 		"file_list.stats.matched":  "● Synced %d",
 		"file_list.stats.pending":  "● Pending %d",
 		"file_list.stats.unbound":  "● Unbound %d",
+		"file_list.stats.matched_short": "Synced %d",
+		"file_list.stats.pending_short": "Pending %d",
+		"file_list.stats.unbound_short": "Unbound %d",
 		"file_list.page_indicator": "  Page %d/%d",
 		"file_list.no_dir":         "(No directory)",
+		"file_list.auto_sync_on":   "Auto sync",
+		"file_list.syncing":        "⟳ Syncing...",
+		"file_list.last_sync":      "Last sync",
 
 		// ── Empty state ─────────────────────────────────────────────────────
 		"empty.no_storage": "  Storage not configured",
@@ -416,6 +436,7 @@ var translations = map[Locale]map[string]string{
 		"empty.configure":  " to configure WebDAV",
 		"empty.no_files":   "  No synced files yet",
 		"empty.add_hint":   " to add files to sync list",
+		"empty.drag_hint":  "  Or drag a file into the window",
 
 		// ── Bottom bar ──────────────────────────────────────────────────────
 		"bottom.storage_unconfigured": "Not configured",
@@ -443,9 +464,9 @@ var translations = map[Locale]map[string]string{
 		"add_file.label.note":         "Note",
 		"add_file.placeholder.path":   "File path (drag in or type manually)",
 		"add_file.placeholder.note":   "Note (optional)",
-		"add_file.path_valid":         "✔ %s  %.1fKB",
+		"add_file.path_valid":         "✔ %s  %s",
 		"add_file.path_invalid":       "✕ Path not accessible",
-		"add_file.hint":               "  Tab Switch  Enter Confirm  Ctrl+Y Copy  Esc Back",
+		"add_file.hint":               "  Tab Switch  Enter Confirm  Ctrl+Y Copy  Esc Back  Or drag a file in",
 		"add_file.error.invalid_path": "Please enter a valid local file path",
 		"add_file.error.is_dir":       "Directories not supported, please select a file",
 		"add_file.error.too_large":    "File exceeds 200MB, sync not supported",
@@ -539,11 +560,18 @@ var translations = map[Locale]map[string]string{
 		"refreshing":         "Refreshing...",
 		"auto_sync.enabled":  "Auto sync enabled",
 		"auto_sync.disabled": "Auto sync disabled",
+		"auto_sync.done":     "Auto sync done",
+		"auto_sync.no_change": "Auto sync done, no changes",
 
 		// ── Warn messages ───────────────────────────────────────────────────
 		"warn.configure_storage":   "Please configure storage settings first",
 		"warn.configure_storage_s": "Please press 's' to configure storage settings",
 		"warn.sync_in_progress":    "Sync in progress, please wait",
+		// ── Paste (drag-and-drop) ─────────────────────────────────────────────
+		"paste.invalid_path": "Path not accessible: %s",
+		"paste.is_dir":       "Directories not supported, please drag a file",
+		"paste.too_large":    "File exceeds 200MB, sync not supported",
+
 
 		// ── Delete ──────────────────────────────────────────────────────────
 		"delete.not_found": "Record not found",

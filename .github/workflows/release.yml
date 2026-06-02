@@ -30,8 +30,6 @@ jobs:
             goarch: amd64
           - goos: android
             goarch: arm64
-          - goos: android
-            goarch: arm
       fail-fast: true
 
     steps:

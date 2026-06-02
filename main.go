@@ -1,28 +1,33 @@
 package main
 
 import (
+	"embed"
 	"fmt"
 	"os"
-	"smallFileSync/internal/i18n"
-	"smallFileSync/internal/ui"
-
-	tea "github.com/charmbracelet/bubbletea"
+	"strconv"
 )
 
+//go:embed internal/web/static/*
+var staticFS embed.FS
+
 func main() {
-	// Detect and set locale
-	locale := i18n.DetectLocale()
-	i18n.SetLocale(locale)
+	args := os.Args[1:]
 
-	app, err := ui.NewApp()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, i18n.T("init.failed")+"\n", err)
+	if len(args) > 0 && args[0] == "web" {
+		port := 8080
+		if len(args) > 1 {
+			if p, err := strconv.Atoi(args[1]); err == nil && p > 0 && p < 65536 {
+				port = p
+			}
+		}
+		startWebMode(port)
+		return
+	}
+
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\nUsage: sfs [web [port]]\n", args[0])
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, i18n.T("run.failed")+"\n", err)
-		os.Exit(1)
-	}
+	startTerminalMode()
 }

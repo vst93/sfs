@@ -86,12 +86,16 @@ func (a *App) renderBottomBar() string {
 		storage = "WebDAV"
 	}
 
-	right := storage
+	// Build right side: auto-sync status + storage
+	rightParts := []string{}
 	if a.syncing {
-		right = i18n.T("bottom.syncing")
+		rightParts = append(rightParts, stylePrimary.Render(i18n.T("bottom.syncing")))
 	} else if a.autoSync {
-		right = fmt.Sprintf(i18n.T("bottom.auto_sync"), a.autoCountdown, storage)
+		rightParts = append(rightParts, a.renderAutoSyncCountdown())
 	}
+	rightParts = append(rightParts, styleMuted.Render(storage))
+	right := strings.Join(rightParts, "  ·  ")
+
 	// Show update badge if new version available
 	if a.updateDone && a.updateResult != nil && a.updateResult.HasUpdate {
 		right = styleWarning.Render(fmt.Sprintf("↑ %s", a.updateResult.LatestVersion)) + "  " + right
@@ -116,7 +120,7 @@ func (a *App) renderBottomBar() string {
 	}
 	left := " " + strings.Join(parts, " · ") + " "
 
-	rightStr := styleMuted.Render(right)
+	rightStr := right
 
 	gap := a.width - lipgloss.Width(left) - lipgloss.Width(rightStr)
 	if gap < 1 {
@@ -126,6 +130,18 @@ func (a *App) renderBottomBar() string {
 	barText := left + strings.Repeat(" ", gap) + rightStr
 
 	return lipgloss.NewStyle().Foreground(colorBarText).Render(barText)
+}
+
+// renderAutoSyncCountdown returns a colored countdown display.
+func (a *App) renderAutoSyncCountdown() string {
+	countdown := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(fmt.Sprintf("%ds", a.autoCountdown))
+	if a.autoCountdown <= 5 {
+		countdown = lipgloss.NewStyle().Bold(true).Foreground(colorWarning).Render(fmt.Sprintf("%ds", a.autoCountdown))
+	}
+	if a.autoCountdown <= 2 {
+		countdown = lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render(fmt.Sprintf("%ds", a.autoCountdown))
+	}
+	return fmt.Sprintf("⟳ auto %s", countdown)
 }
 
 // ── File list ───────────────────────────────────────────────────────────────
@@ -159,19 +175,51 @@ func (a *App) renderFileList() string {
 
 	// ── Top header ──
 	_, matched, pending, unbound := a.countStats()
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(" " + model.AppFullName))
-	b.WriteString(styleMuted.Render("  v" + model.AppVersion))
+	b.WriteString(" " + model.AppFullName + styleMuted.Render("  v"+model.AppVersion))
 	b.WriteString("\n\n")
 
-	// Stats line
-	statsParts := []string{}
-	statsParts = append(statsParts, fmt.Sprintf(i18n.T("file_list.files_count"), total))
-	statsParts = append(statsParts, styleSuccess.Render(fmt.Sprintf(i18n.T("file_list.stats.matched"), matched)))
-	statsParts = append(statsParts, styleWarning.Render(fmt.Sprintf(i18n.T("file_list.stats.pending"), pending)))
+	// ── Info bar: stats (left) · auto-sync (right) ──
+	chipStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	chipStyleSuccess := lipgloss.NewStyle().Foreground(colorSuccess)
+	chipStyleWarning := lipgloss.NewStyle().Foreground(colorWarning)
+
+	// Left: file stats
+	leftParts := []string{}
+	leftParts = append(leftParts, fmt.Sprintf(i18n.T("file_list.files_count"), total))
+	leftParts = append(leftParts, chipStyleSuccess.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.matched_short"), matched)))
+	leftParts = append(leftParts, chipStyleWarning.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.pending_short"), pending)))
 	if unbound > 0 {
-		statsParts = append(statsParts, styleMuted.Render(fmt.Sprintf(i18n.T("file_list.stats.unbound"), unbound)))
+		leftParts = append(leftParts, chipStyle.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.unbound_short"), unbound)))
 	}
-	b.WriteString("  " + strings.Join(statsParts, "  "))
+	left := strings.Join(leftParts, "  ")
+
+	// Right: auto-sync status
+	right := ""
+	if a.autoSync {
+		autoLabel := i18n.T("file_list.auto_sync_on")
+		if a.syncing {
+			autoLabel = i18n.T("file_list.syncing")
+		}
+		countdownStr := fmt.Sprintf("%ds", a.autoCountdown)
+		if a.autoCountdown <= 5 {
+			countdownStr = styleWarning.Render(countdownStr)
+		} else {
+			countdownStr = stylePrimary.Render(countdownStr)
+		}
+		right = chipStyle.Render("⟳ ") + autoLabel + "  " + countdownStr
+		if !a.lastSyncTime.IsZero() {
+			right += chipStyle.Render(fmt.Sprintf("  ·  %s %s", i18n.T("file_list.last_sync"), a.lastSyncTime.Format("15:04:05")))
+		}
+	}
+
+	// Compose info bar with left/right alignment (right side has 2-char padding)
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	gap := a.width - leftW - rightW - 4 // 4 = 2 indent left + 2 padding right
+	if gap < 1 {
+		gap = 1
+	}
+	b.WriteString("  " + left + strings.Repeat(" ", gap) + right + "  ")
 	b.WriteString("\n")
 
 	// ── List rows ──
@@ -244,11 +292,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	// ── Right part ──
 	rightParts := []string{}
 	if item.Size > 0 {
-		if item.Size >= 1024 {
-			rightParts = append(rightParts, fmt.Sprintf("%.1fM", item.Size/1024))
-		} else {
-			rightParts = append(rightParts, fmt.Sprintf("%.0fK", item.Size))
-		}
+		rightParts = append(rightParts, formatKB(item.Size))
 	}
 	if item.LastUploadTime > 0 {
 		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
@@ -277,7 +321,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if lipgloss.Width(name) > nameW {
 		runes := []rune(name)
 		if len(runes) > nameW-1 {
-			name = string(runes[:nameW-1]) + "…"
+			name = string(runes[:nameW-1]) + "..."
 		}
 	}
 	pad := nameW - lipgloss.Width(name)
@@ -327,7 +371,7 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 
 	line := "       " + strings.Join(parts, " · ")
 	if len(line) > a.width {
-		line = line[:a.width-1] + "…"
+		line = line[:a.width-1] + "..."
 	}
 	return styleMuted.Render(line)
 }
@@ -366,6 +410,8 @@ func (a *App) renderEmpty() string {
 		b.WriteString(i18n.T("empty.press"))
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("a"))
 		b.WriteString(i18n.T("empty.add_hint"))
+		b.WriteString("\n")
+		b.WriteString(styleMuted.Render(i18n.T("empty.drag_hint")))
 	}
 	return b.String()
 }
@@ -390,7 +436,7 @@ func (a *App) renderAddFile() string {
 	b.WriteString(a.addFileInputs[0].View())
 	b.WriteString("\n")
 	if a.addFileStats != nil {
-		b.WriteString("        " + styleSuccess.Render(fmt.Sprintf(i18n.T("add_file.path_valid"), a.addFileStats.Name(), float64(a.addFileStats.Size())/1024)))
+		b.WriteString("        " + styleSuccess.Render(fmt.Sprintf(i18n.T("add_file.path_valid"), a.addFileStats.Name(), formatBytes(a.addFileStats.Size()))))
 	} else if a.addFilePath != "" {
 		b.WriteString("        " + styleDanger.Render(i18n.T("add_file.path_invalid")))
 	}
@@ -578,13 +624,7 @@ func (a *App) renderNoteView() string {
 	b.WriteString("\n")
 	b.WriteString("  " + styleMuted.Render(i18n.T("note.status")+": ") + state.Text)
 	if item.Size > 0 {
-		var sizeStr string
-		if item.Size >= 1024 {
-			sizeStr = fmt.Sprintf("%.1fM", item.Size/1024)
-		} else {
-			sizeStr = fmt.Sprintf("%.0fK", item.Size)
-		}
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.size")+": ") + sizeStr)
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.size")+": ") + formatKB(item.Size))
 	}
 	if item.LastUploadTime > 0 {
 		b.WriteString("  " + styleMuted.Render(i18n.T("note.uploaded")+": ") + time.UnixMilli(item.LastUploadTime).Format("2006-01-02 15:04"))
@@ -767,7 +807,7 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	return s[:maxLen-1] + "..."
 }
 
 func min(a, b int) int {
@@ -775,4 +815,42 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// formatBytes formats a byte count into a human-readable string.
+func formatBytes(b int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+	switch {
+	case b >= GB:
+		return fmt.Sprintf("%.1fGB", float64(b)/float64(GB))
+	case b >= MB:
+		return fmt.Sprintf("%.1fMB", float64(b)/float64(MB))
+	case b >= KB:
+		return fmt.Sprintf("%.1fKB", float64(b)/float64(KB))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
+// formatKB formats a size stored in KB into a human-readable string.
+func formatKB(kb float64) string {
+	const (
+		MB = 1024.0
+		GB = MB * 1024
+	)
+	switch {
+	case kb >= GB:
+		return fmt.Sprintf("%.1fGB", kb/GB)
+	case kb >= MB:
+		return fmt.Sprintf("%.1fMB", kb/MB)
+	default:
+		if kb < 1 {
+			return "<1KB"
+		}
+		return fmt.Sprintf("%.0fKB", kb)
+	}
 }
