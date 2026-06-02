@@ -28,6 +28,13 @@ jobs:
             goarch: arm64
           - goos: windows
             goarch: amd64
+          - goos: android
+            goarch: arm64
+          - goos: android
+            goarch: arm
+        exclude:
+          - goos: windows
+            goarch: arm64
       fail-fast: true
 
     steps:
@@ -39,32 +46,59 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Setup Android NDK
+        if: matrix.goos == 'android'
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26b
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${{ env.BINARY_PREFIX }}.exe" .
+          
+          # 设置 Android 交叉编译工具链
+          if [ "$GOOS" = "android" ]; then
+            export CGO_ENABLED=1
+            if [ "$GOARCH" = "arm64" ]; then
+              export CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android32-clang"
+            elif [ "$GOARCH" = "arm" ]; then
+              export CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi32-clang"
+            fi
           else
-            go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${{ env.BINARY_PREFIX }}" .
+            export CGO_ENABLED=0
           fi
+          
+          # 设置输出文件名
+          if [ "$GOOS" = "windows" ]; then
+            OUTPUT="${{ env.BINARY_PREFIX }}.exe"
+          elif [ "$GOOS" = "android" ]; then
+            OUTPUT="${{ env.BINARY_PREFIX }}-$GOARCH"
+          else
+            OUTPUT="${{ env.BINARY_PREFIX }}"
+          fi
+          
+          go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "$OUTPUT" .
 
       - name: Create archive
         run: |
           ZIPNAME="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}.exe"
+          elif [ "${{ matrix.goos }}" = "android" ]; then
+            zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}-${{ matrix.goarch }}"
           else
             zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}"
           fi
 
       - name: Generate SHA256 checksum
         run: |
-          OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          sha256sum "${OUTPUT}.zip" | awk '{print $1}' > "${OUTPUT}.zip.sha256"
+          ZIPNAME="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          sha256sum "${ZIPNAME}.zip" | awk '{print $1}' > "${ZIPNAME}.zip.sha256"
 
       - name: Upload archive to release
         uses: svenstaro/upload-release-action@v2

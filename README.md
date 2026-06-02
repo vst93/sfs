@@ -2,28 +2,26 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg?logo=go)](https://golang.org)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](.)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android-lightgrey.svg)](.)
 
 <div align="center">
 
 A WebDAV-based terminal file sync tool
 
+**[English](#english)** · **[中文](#中文)**
+
 </div>
 
 ---
 
-## Table of Contents
+## English
 
 - [Introduction](#introduction)
 - [Features](#features)
-- [Limits](#limits)
 - [Why Not Just Use Cloud Storage?](#why-not-just-use-cloud-storage)
-- [Use Cases](#use-cases)
 - [Installation](#installation)
-- [Build from Source](#build-from-source)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Configuration Details](#configuration-details)
 - [Keybindings](#keybindings)
 - [File Status](#file-status)
 - [Architecture](#architecture)
@@ -31,147 +29,83 @@ A WebDAV-based terminal file sync tool
 - [Contributing](#contributing)
 - [License](#license)
 
----
+### Introduction
 
-## Introduction
+SFS (SmallFileSync) is a terminal-based file sync tool built on [Bubble Tea](https://github.com/charmbracelet/bubbletea). It syncs individual files via WebDAV (Jianguoyun/Nutstore, etc.), designed for developers who need small files — configs, dotfiles, IDE settings — consistent across machines.
 
-SFS (SmallFileSync) is a terminal-based file synchronization tool built on the [Bubble Tea](https://github.com/charmbracelet/bubbletea) framework. With support for mainstream WebDAV providers like Jianguoyun (Nutstore), it's designed for developers who need to keep small files — config files, dotfiles, IDE settings — consistent across multiple machines.
+### Features
 
----
-
-## Features
-
-- **Whole-file Transfer** — Files are uploaded/downloaded as a single unit (no chunking)
-- **MD5 Verification** — Integrity checks ensuring lossless transfers
-- **Conflict Detection** — Smart conflict identification with manual resolution
+- **Whole-file Transfer** — No chunking; files uploaded/downloaded as a unit
+- **MD5 Verification** — Integrity checks for lossless transfers
+- **Conflict Detection** — Smart detection with manual resolution
 - **Auto Sync** — Configurable automatic sync countdown
-- **i18n** — Switch between Chinese and English UI with a single key (`L`)
-- **Data Migration** — Import data from the legacy uTools plugin; old chunked records are automatically migrated to the new single-file format
+- **i18n** — Switch Chinese/English with `L` key
+- **Data Migration** — Auto-migrates legacy uTools plugin data
+- **Platform** — Linux, macOS, Windows, Android (via Termux)
 
----
+> Single file size limit: ≤ 200MB. No hard limit on file count, but keep sizes modest for best performance.
 
-## Limits
-
-| Item | Limit |
-|------|-------|
-| Single file size | ≤ 200MB |
-
-> Note: There is no hard limit on the number of synced files. However, since SFS transfers whole files without chunking, keeping file sizes modest is recommended for best performance.
-
----
-
-## Why Not Just Use Cloud Storage?
-
-SFS is not a replacement for cloud storage (Dropbox, Google Drive, Nutstore/Jianguoyun). It serves a different purpose:
+### Why Not Just Use Cloud Storage?
 
 | | Cloud Storage | SFS |
 |--|--|--|
-| **Sync approach** | Syncs entire folders; watches for filesystem changes | Sync individual files you choose, on demand |
-| **Storage usage** | Files live in the cloud, consuming quota | Uses your existing WebDAV storage; files stay on your machines |
-| **Conflict handling** | Creates duplicate/conflict files automatically | Detects conflicts, prompts manual resolution |
-| **Setup** | Install client, point to folder | Add files one by one — no client-side daemon |
-| **Control** | Proprietary sync logic, opaque | You control which files, when, and which direction |
+| **Sync approach** | Watches entire folders | Sync individual chosen files |
+| **Storage usage** | Files in cloud, consuming quota | Uses your existing WebDAV; files stay local |
+| **Conflict handling** | Auto-creates duplicate files | Detects & prompts manual resolution |
+| **Setup** | Install client, point to folder | Add files one by one, no daemon |
 
----
+### Installation
 
-## Use Cases
+**Homebrew (macOS/Linux):**
 
-**Developer config sync** — Keep your `.bashrc`, `.vimrc`, `starship.toml`, or `.gitconfig` consistent across machines. Edit on one, sync to others.
+```bash
+brew install vst93/tap/sfs
+```
 
-**Dotfiles management** — A lightweight alternative to GNU Stow or yadm for syncing dotfiles via any WebDAV provider.
-
-**Project-specific settings** — Share IDE/editor configs (`.editorconfig`, `.prettierrc`, `settings.json`) within a team using a shared WebDAV account.
-
-**Secret bootstrap** — Sync small credential files (encrypted `.env`, SSH configs) between personal machines during initial setup.
-
-**What SFS is NOT for:**
-
-- Large media files (movies, images, datasets)
-- Full-folder real-time sync
-- Collaborative document editing with multiple simultaneous writers
-
----
-
-## Installation
-
-### Install script (recommended)
+**Install script:**
 
 ```bash
 curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
 ```
 
-The script auto-detects your platform, downloads the latest release, and installs the binary.
+Options: `--install-dir /custom/path`, `FORCE_INSTALL=1`, `AUTO_DELETE_INSTALL_SCRIPT=0`
 
-Options:
-
-```bash
-# Install to a custom directory
-curl -fsSL ... | bash -s -- --install-dir /usr/local/bin
-# Force install (skip checksum errors)
-FORCE_INSTALL=1 curl -fsSL ... | bash
-# Keep the install script after download
-AUTO_DELETE_INSTALL_SCRIPT=0 curl -fsSL ... | bash
-```
-
-Supported platforms: Linux (amd64, arm64), macOS (amd64, arm64)
-
-### go install
+**go install:**
 
 ```bash
 go install github.com/vst93/sfs@latest
 ```
 
-Requires **Go 1.21+**
-
----
-
-## Build from Source
-
-**Prerequisites:** Go 1.21+, Git
+**Build from source:**
 
 ```bash
-git clone https://github.com/vst93/sfs.git
-cd sfs
+git clone https://github.com/vst93/sfs.git && cd sfs
 go build -o sfs
 ```
 
-Optionally install to your `$GOPATH/bin`:
-
-```bash
-go install
-```
-
----
-
-## Quick Start
+### Quick Start
 
 ```bash
 sfs
 ```
 
-1. Press `s` to configure your WebDAV connection (URL, username, password)
-2. Press `e` to set local sync directory
-3. Press `a` to add files for synchronization
-4. Press `Enter` for smart sync, or `y` to sync all
+1. `s` — Configure WebDAV connection (URL, username, password)
+2. `e` — Set local sync directory
+3. `a` — Add files for syncing
+4. `Enter` — Smart sync (auto-detect direction), or `y` to sync all
 
----
+### Configuration
 
-## Configuration
-
-Configuration files are stored in `~/.config/small-filesync/`:
+Config files stored in `~/.config/small-filesync/` (Linux), `~/Library/Application Support/small-filesync/` (macOS), `%APPDATA%\small-filesync\` (Windows):
 
 | File | Description |
 |------|-------------|
-| `settings.json` | WebDAV server config, auto-sync toggle, language |
-| `dirmap_<uid>.json` | Local directory mappings (separated by machine UID) |
-| `filestate_<uid>.json` | File sync states (MD5, mtime, last sync time) |
+| `settings.json` | WebDAV config, auto-sync toggle, language |
+| `dirmap_<uid>.json` | Local directory mappings (per machine) |
+| `filestate_<uid>.json` | File sync states (MD5, mtime) |
 | `uid` | Machine unique identifier |
 
----
-
-## Configuration Details
-
-Complete `settings.json` example (Jianguoyun / Nutstore):
+`settings.json` example (Jianguoyun):
 
 ```json
 {
@@ -189,168 +123,75 @@ Complete `settings.json` example (Jianguoyun / Nutstore):
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `storage.webdav.endpoint` | WebDAV server URL |
-| `storage.webdav.username` | Account email |
-| `storage.webdav.password` | App-specific password |
-| `storage.webdav.basePath` | Remote directory (default: `small-file-sync`) |
-| `autoSync` | Enable automatic sync (`true`/`false`) |
-| `language` | UI language: `"en"` or `"zh"` |
+### Keybindings
 
-**Config file path by platform:**
+| Key | Action | Key | Action |
+|-----|--------|-----|--------|
+| `j` / `k` | Up / Down | `g` / `G` | First / Last |
+| `Enter` | Smart sync | `y` | Sync all |
+| `u` | Force upload | `d` | Force download |
+| `a` | Add file | `x` | Delete record |
+| `s` | Storage settings | `e` | Set local directory |
+| `o` | Toggle auto sync | `r` | Refresh |
+| `Ctrl+Y` | Copy file path | `L` | Switch language |
+| `?` | Help | `q` | Quit |
 
-| Platform | Path |
-|----------|------|
-| Linux | `~/.config/small-filesync/` |
-| macOS | `~/Library/Application Support/small-filesync/` |
-| Windows | `%APPDATA%\small-filesync\` |
-
----
-
-## Keybindings
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Navigate up/down |
-| `PgUp` / `PgDn` | Page up/down |
-| `g` / `G` | Jump to first/last |
-| `Enter` | Smart sync (auto-detect direction) |
-| `u` | Force upload |
-| `d` | Force download |
-| `x` | Delete sync record |
-| `e` | Set local directory |
-| `a` | Add file |
-| `s` | Storage settings |
-| `y` | Sync all |
-| `o` | Toggle auto sync |
-| `r` | Refresh |
-| `Ctrl+Y` | Copy file path |
-| `L` | Switch language |
-| `?` | Help |
-| `q` | Quit |
-
----
-
-## File Status
+### File Status
 
 | Status | Description |
 |--------|-------------|
 | Synced | Local and cloud match |
 | To Upload | Local has changes |
 | To Download | Cloud has changes |
-| First Upload | Not yet uploaded to cloud |
-| Missing | Local file absent, can restore from cloud |
-| Conflict | Both sides modified, manual resolution needed |
+| First Upload | Not yet uploaded |
+| Missing | Local absent; restorable from cloud |
+| Conflict | Both modified; manual resolution needed |
 | Unbound | No local directory linked |
 
----
-
-## Architecture
+### Architecture
 
 ```
-+------------------------------------------+
-|           SFS TUI Interface              |
-|        (Bubble Tea / Lipgloss)           |
-+------------------------------------------+
-|            Sync Engine                   |
-|  +-------------+  +-------------------+  |
-|  | Whole-file  |  |  MD5 Check /      |  |
-|  | Transfer    |  |  Conflict Detect  |  |
-|  +-------------+  +-------------------+  |
-+------------------------------------------+
-|           Storage Layer                  |
-|  +-------------+  +-------------------+  |
-|  |   WebDAV    |  |  Local JSON Files |  |
-|  |  (Remote)   |  |  (State / Config) |  |
-|  +-------------+  +-------------------+  |
-+------------------------------------------+
+SFS TUI (Bubble Tea / Lipgloss)
+        │
+Sync Engine (Whole-file Transfer · MD5 Check · Conflict Detect)
+        │
+Storage Layer (WebDAV Remote + Local JSON State/Config)
 ```
 
-**Remote storage layout:**
+Remote storage layout:
 
     <basePath>/
-      meta/
-        fileList.json      <- File list (FileRecord[])
-      data/
-        file_<id>          <- Whole file data (Base64 encoded)
+      meta/fileList.json      ← File list
+      data/file_<id>          ← Whole file (Base64)
 
----
+### Troubleshooting
 
-## Troubleshooting
+**Connection failed** — Verify URL, credentials (use app-specific password for Jianguoyun), and check firewall/proxy.
 
-**WebDAV connection failed**
+**Sync timeout** — Reduce batch size; check network stability.
 
-- Verify your `webdav_url` is correct and accessible from your network
-- Ensure your username and password are valid (use an app-specific password if required by the provider)
-- Check firewall or proxy settings that may block HTTPS requests
+**Conflict** — File shows `Conflict` when both sides modified. Use `u` (keep local) or `d` (keep remote).
 
-**Sync timeout**
+**Legacy migration** — Runs automatically on first launch. No manual action needed.
 
-- Large files or slow networks may cause timeouts; try syncing fewer files at a time
-- Verify network stability and consider increasing the connection timeout if your provider supports it
+### Contributing
 
-**Conflict resolution**
+Bug reports, PRs, and i18n contributions are welcome. Run `gofmt` and `go vet` before submitting.
 
-- When a file shows `Conflict` status, both local and remote versions have been modified
-- Use `u` to force upload (keep local) or `d` to force download (keep remote)
-- Review both versions manually before choosing to avoid data loss
-
-**Old data migration (FileIds to FileID)**
-
-- SFS automatically migrates legacy chunked data (FileIds) to the new single-file format (FileID) on first access
-- No manual action is required; migration runs in the background when you open the TUI
-- If migration fails, check the error message and ensure sufficient local disk space is available
-
----
-
-## Contributing
-
-Contributions are welcome! Here's how you can help:
-
-- **Bug reports** — Open an issue with steps to reproduce, expected behavior, and actual behavior
-- **Pull requests** — Fork the repo, create a feature branch, and submit a PR with a clear description
-- **Code style** — Run `gofmt` and `go vet` before submitting; ensure no warnings
-- **i18n** — Translation contributions for additional languages are appreciated
-
----
-
-## License
+### License
 
 MIT License © 2026 [vst](https://github.com/vst93)
 
 ---
 
----
-
----
-
-# SFS — SmallFileSync
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg?logo=go)](https://golang.org)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)](.)
-
-<div align="center">
-
-基于 WebDAV 的终端文件同步工具
-
-</div>
-
----
-
-## 目录
+## 中文
 
 - [项目介绍](#项目介绍)
 - [功能特性](#功能特性)
-- [限制](#限制)
 - [为什么不直接用网盘？](#为什么不直接用网盘)
-- [应用场景](#应用场景)
 - [安装](#安装)
-- [从源码构建](#从源码构建)
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
-- [配置详情](#配置详情)
 - [快捷键](#快捷键)
 - [文件状态](#文件状态)
 - [架构设计](#架构设计)
@@ -358,152 +199,88 @@ MIT License © 2026 [vst](https://github.com/vst93)
 - [参与贡献](#参与贡献)
 - [许可证](#许可证)
 
----
+### 项目介绍
 
-## 项目介绍
+SFS (SmallFileSync) 是一款基于 WebDAV 的终端文件同步工具，使用 Go + [Bubble Tea](https://github.com/charmbracelet/bubbletea) 构建。支持坚果云等主流 WebDAV 服务，专为需要在多台机器间保持小文件（配置文件、dotfiles、IDE 设置）一致性的开发者设计。
 
-SFS (SmallFileSync) 是一款基于 WebDAV 的终端文件同步工具，使用 Go 语言编写，搭配 [Bubble Tea](https://github.com/charmbracelet/bubbletea) 构建的直观 TUI 界面。支持坚果云等主流 WebDAV 服务，专为需要在多台机器之间保持小文件（配置文件、dotfiles、IDE 设置）一致性的开发者设计。
+### 功能特性
 
----
-
-## 功能特性
-
-- **整文件传输** — 文件作为单个单元上传/下载（不分块）
+- **整文件传输** — 文件作为单个单元上传/下载，不分块
 - **MD5 校验** — 完整性检查，确保无损传输
 - **冲突检测** — 智能识别冲突，支持手动解决
 - **自动同步** — 可配置的自动同步倒计时
-- **国际化** — 一键切换中英文界面（`L` 键）
-- **数据迁移** — 支持从旧版 uTools 插件导入数据；旧的分块记录会自动迁移到新的整文件格式
+- **国际化** — `L` 键一键切换中英文界面
+- **数据迁移** — 自动迁移旧版 uTools 插件数据
+- **多平台** — Linux、macOS、Windows、Android（通过 Termux）
 
----
+> 单文件大小限制：≤ 200MB。文件数量无硬性限制，但建议保持文件体积适中以获得最佳性能。
 
-## 限制
-
-| 项目 | 限制 |
-|------|-------|
-| 单文件大小 | ≤ 200MB |
-
-> 注意：同步文件数量没有硬性限制。但由于 SFS 采用整文件传输（无分块），建议保持文件体积适中，以获得最佳性能。
-
----
-
-## 为什么不直接用网盘？
-
-SFS 不是网盘（Dropbox、Google Drive、坚果云）的替代品，它解决的是不同的问题：
+### 为什么不直接用网盘？
 
 | | 网盘 | SFS |
 |--|--|--|
-| **同步方式** | 监听整个文件夹的文件系统变更 | 按需同步你手动指定的文件 |
-| **存储占用** | 文件常驻云端，消耗配额 | 复用已有 WebDAV 存储，文件留在本地 |
-| **冲突处理** | 自动生成副本/冲突文件 | 检测冲突，提示手动解决 |
-| **配置** | 安装客户端，指向目录 | 逐个添加文件，无需本地守护进程 |
-| **控制权** | 闭源同步逻辑，不透明 | 自主选择同步文件、时机和方向 |
+| **同步方式** | 监听整个文件夹变更 | 按需同步手动指定的文件 |
+| **存储占用** | 文件常驻云端，消耗配额 | 复用已有 WebDAV 存储 |
+| **冲突处理** | 自动生成副本文件 | 检测并提示手动解决 |
+| **配置** | 安装客户端，指向目录 | 逐个添加文件，无需守护进程 |
 
----
+### 安装
 
-## 应用场景
+**Homebrew (macOS/Linux)：**
 
-**开发配置同步** — 在多台机器间保持 `.bashrc`、`.vimrc`、`starship.toml` 或 `.gitconfig` 一致。在一台编辑，同步到其他机器。
+```bash
+brew install vst93/tap/sfs
+```
 
-**Dotfiles 管理** — 相比 GNU Stow 或 yadm 的更轻量方案，通过任意 WebDAV 服务同步 dotfiles。
-
-**项目配置共享** — 通过共享 WebDAV 账户在团队内同步 IDE/编辑器配置（`.editorconfig`、`.prettierrc`、`settings.json`）。
-
-**密钥引导** — 在初始搭建阶段，在个人机器间同步小型凭据文件（加密 `.env`、SSH 配置）。
-
-**SFS 不适合：**
-
-- 大型媒体文件（电影、图片、数据集）
-- 整文件夹实时同步
-- 多人同时编辑的协作文档
-
----
-
-## 安装
-
-### 安装脚本（推荐）
+**安装脚本：**
 
 ```bash
 curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
 ```
 
-脚本自动检测平台、下载最新发布版本并安装二进制文件。
+可选参数：`--install-dir /自定义路径`、`FORCE_INSTALL=1`、`AUTO_DELETE_INSTALL_SCRIPT=0`
 
-可选参数：
-
-```bash
-# 安装到指定目录
-curl -fsSL ... | bash -s -- --install-dir /usr/local/bin
-# 强制安装（跳过校验错误）
-FORCE_INSTALL=1 curl -fsSL ... | bash
-# 下载后保留安装脚本
-AUTO_DELETE_INSTALL_SCRIPT=0 curl -fsSL ... | bash
-```
-
-支持平台：Linux (amd64, arm64)、macOS (amd64, arm64)
-
-### go install
+**go install：**
 
 ```bash
 go install github.com/vst93/sfs@latest
 ```
 
-需要 **Go 1.21+**
-
----
-
-## 从源码构建
-
-**前置要求：** Go 1.21+、Git
+**从源码构建：**
 
 ```bash
-git clone https://github.com/vst93/sfs.git
-cd sfs
+git clone https://github.com/vst93/sfs.git && cd sfs
 go build -o sfs
 ```
 
-可选安装到 `$GOPATH/bin`：
-
-```bash
-go install
-```
-
----
-
-## 快速开始
+### 快速开始
 
 ```bash
 sfs
 ```
 
-1. 按 `s` 配置 WebDAV 连接（URL、用户名、密码）
-2. 按 `e` 设置本地同步目录
-3. 按 `a` 添加需要同步的文件
-4. 按 `Enter` 智能同步，或按 `y` 同步全部
+1. `s` — 配置 WebDAV 连接（URL、用户名、密码）
+2. `e` — 设置本地同步目录
+3. `a` — 添加需要同步的文件
+4. `Enter` — 智能同步（自动检测方向），或 `y` 同步全部
 
----
+### 配置说明
 
-## 配置说明
-
-配置文件存储在 `~/.config/small-filesync/`：
+配置文件路径：`~/.config/small-filesync/`（Linux）、`~/Library/Application Support/small-filesync/`（macOS）、`%APPDATA%\small-filesync\`（Windows）：
 
 | 文件 | 说明 |
 |------|------|
-| `settings.json` | WebDAV 服务器配置、自动同步开关、语言设置 |
+| `settings.json` | WebDAV 配置、自动同步、语言设置 |
 | `dirmap_<uid>.json` | 本地目录映射（按机器 UID 分离） |
-| `filestate_<uid>.json` | 文件同步状态（MD5、修改时间、上次同步时间） |
+| `filestate_<uid>.json` | 文件同步状态（MD5、修改时间） |
 | `uid` | 机器唯一标识符 |
 
----
-
-## 配置详情
-
-完整的 `settings.json` 示例（以坚果云为例）：
+`settings.json` 完整示例（以坚果云为例）：
 
 ```json
 {
   "autoSync": true,
-  "language": "en",
+  "language": "zh",
   "storage": {
     "type": "webdav",
     "webdav": {
@@ -516,132 +293,61 @@ sfs
 }
 ```
 
-| 字段 | 说明 |
-|------|------|
-| `storage.webdav.endpoint` | WebDAV 服务器地址 |
-| `storage.webdav.username` | 登录邮箱 |
-| `storage.webdav.password` | 应用专用密码 |
-| `storage.webdav.basePath` | 远程目录（默认 `small-file-sync`） |
-| `autoSync` | 是否启用自动同步 |
-| `language` | 界面语言：`"en"` 或 `"zh"` |
+### 快捷键
 
-**各平台配置文件路径：**
+| 按键 | 操作 | 按键 | 操作 |
+|------|------|------|------|
+| `j` / `k` | 上/下导航 | `g` / `G` | 跳转首/末项 |
+| `Enter` | 智能同步 | `y` | 同步全部 |
+| `u` | 强制上传 | `d` | 强制下载 |
+| `a` | 添加文件 | `x` | 删除记录 |
+| `s` | 存储设置 | `e` | 设置本地目录 |
+| `o` | 切换自动同步 | `r` | 刷新 |
+| `Ctrl+Y` | 复制文件路径 | `L` | 切换语言 |
+| `?` | 帮助 | `q` | 退出 |
 
-| 平台 | 路径 |
-|------|------|
-| Linux | `~/.config/small-filesync/` |
-| macOS | `~/Library/Application Support/small-filesync/` |
-| Windows | `%APPDATA%\small-filesync\` |
-
----
-
-## 快捷键
-
-| 按键 | 操作 |
-|------|------|
-| `j` / `k` | 上/下导航 |
-| `PgUp` / `PgDn` | 上/下翻页 |
-| `g` / `G` | 跳转到首/末项 |
-| `Enter` | 智能同步（自动检测方向） |
-| `u` | 强制上传 |
-| `d` | 强制下载 |
-| `x` | 删除同步记录 |
-| `e` | 设置本地目录 |
-| `a` | 添加文件 |
-| `s` | 存储设置 |
-| `y` | 同步全部 |
-| `o` | 切换自动同步 |
-| `r` | 刷新 |
-| `Ctrl+Y` | 复制文件路径 |
-| `L` | 切换语言 |
-| `?` | 帮助 |
-| `q` | 退出 |
-
----
-
-## 文件状态
+### 文件状态
 
 | 状态 | 说明 |
 |------|------|
 | Synced | 本地与云端一致 |
 | To Upload | 本地有变更 |
 | To Download | 云端有变更 |
-| First Upload | 尚未上传到云端 |
-| Missing | 本地文件缺失，可从云端恢复 |
+| First Upload | 尚未上传 |
+| Missing | 本地缺失，可从云端恢复 |
 | Conflict | 双方均有修改，需手动解决 |
 | Unbound | 未绑定本地目录 |
 
----
-
-## 架构设计
+### 架构设计
 
 ```
-+------------------------------------------+
-|           SFS TUI Interface              |
-|        (Bubble Tea / Lipgloss)           |
-+------------------------------------------+
-|            Sync Engine                   |
-|  +-------------+  +-------------------+  |
-|  | Whole-file  |  |  MD5 Check /      |  |
-|  | Transfer    |  |  Conflict Detect  |  |
-|  +-------------+  +-------------------+  |
-+------------------------------------------+
-|           Storage Layer                  |
-|  +-------------+  +-------------------+  |
-|  |   WebDAV    |  |  Local JSON Files |  |
-|  |  (Remote)   |  |  (State / Config) |  |
-|  +-------------+  +-------------------+  |
-+------------------------------------------+
+SFS TUI 界面 (Bubble Tea / Lipgloss)
+        │
+同步引擎 (整文件传输 · MD5 校验 · 冲突检测)
+        │
+存储层 (WebDAV 远程 + 本地 JSON 状态/配置)
 ```
 
-**远程存储布局：**
+远程存储布局：
 
     <basePath>/
-      meta/
-        fileList.json      <- 文件列表 (FileRecord[])
-      data/
-        file_<id>          <- 整文件数据 (Base64 编码)
+      meta/fileList.json      ← 文件列表
+      data/file_<id>          ← 整文件数据 (Base64)
 
----
+### 故障排查
 
-## 故障排查
+**连接失败** — 确认 URL 和凭据正确（坚果云需使用应用专用密码），检查防火墙/代理设置。
 
-**WebDAV 连接失败**
+**同步超时** — 减少单次同步文件数量，检查网络稳定性。
 
-- 确认 `webdav_url` 正确且可从当前网络访问
-- 确保用户名和密码有效（部分服务提供商要求使用应用专用密码）
-- 检查防火墙或代理设置是否阻止了 HTTPS 请求
+**冲突** — 本地和远程均被修改时显示 `Conflict`，按 `u`（保留本地）或 `d`（保留远程）解决。
 
-**同步超时**
+**旧数据迁移** — 首次启动自动执行，无需手动操作。
 
-- 大文件或网络较慢可能导致超时；尝试减少单次同步的文件数量
-- 检查网络稳定性，如服务提供商支持，可考虑增加连接超时时间
+### 参与贡献
 
-**冲突解决**
+欢迎提交 Issue、PR 和翻译贡献。提交前请运行 `gofmt` 和 `go vet`。
 
-- 文件显示 `Conflict` 状态时，表示本地和远程版本均已被修改
-- 按 `u` 强制上传（保留本地版本）或按 `d` 强制下载（保留远程版本）
-- 选择前请手动检查两个版本，避免数据丢失
-
-**旧数据迁移（FileIds 到 FileID）**
-
-- SFS 会在首次访问时自动将旧版分块数据（FileIds）迁移到新的整文件格式（FileID）
-- 无需手动操作；打开 TUI 时迁移会在后台自动运行
-- 如果迁移失败，请查看错误信息并确保本地磁盘空间充足
-
----
-
-## 参与贡献
-
-欢迎参与贡献！以下是参与方式：
-
-- **问题报告** — 提交 Issue 时请附上复现步骤、预期行为和实际行为
-- **代码贡献** — Fork 仓库，创建功能分支，提交 PR 并附上清晰的说明
-- **代码规范** — 提交前请运行 `gofmt` 和 `go vet`，确保无警告
-- **国际化** — 欢迎贡献其他语言的翻译
-
----
-
-## 许可证
+### 许可证
 
 MIT License © 2026 [vst](https://github.com/vst93)
