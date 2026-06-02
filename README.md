@@ -29,7 +29,6 @@ A WebDAV-based terminal file sync tool
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
-- [Changelog](#changelog)
 - [License](#license)
 
 ---
@@ -316,28 +315,9 @@ Contributions are welcome! Here's how you can help:
 
 ---
 
-## Changelog
-
-**v0.2.0**
-
-- Removed sync file count limit (previously capped at 30)
-- Increased single file size limit from 10MB to 200MB
-- Added comparison with cloud storage providers in README
-- Added usage scenario examples (dotfiles, config sync, project settings)
-
-**v0.1.0**
-
-- Initial release
-- WebDAV-based sync engine
-- Whole-file transfer with MD5 verification
-- Internationalization (Chinese / English)
-- Automatic sync with configurable interval
-
----
-
 ## License
 
-MIT License © 2026 [vst93](https://github.com/vst93)
+MIT License © 2026 [vst](https://github.com/vst93)
 
 ---
 
@@ -376,7 +356,6 @@ MIT License © 2026 [vst93](https://github.com/vst93)
 - [架构设计](#架构设计)
 - [故障排查](#故障排查)
 - [参与贡献](#参与贡献)
-- [更新日志](#更新日志)
 - [许可证](#许可证)
 
 ---
@@ -663,25 +642,6 @@ sfs
 
 ---
 
-## 更新日志
-
-**v0.2.0**
-
-- 移除了同步文件数量限制（之前上限为 30 个）
-- 单文件大小上限从 10MB 提升至 200MB
-- 在 README 中新增了与网盘的对比说明
-- 新增了应用场景示例（dotfiles、配置同步、项目设置）
-
-**v0.1.0**
-
-- 首次发布
-- 基于 WebDAV 的同步引擎
-- 整文件传输与 MD5 校验
-- 国际化支持（中文 / 英文）
-- 可配置间隔的自动同步
-
----
-
 ## 许可证
 
-MIT License © 2026 [vst93](https://github.com/vst93)
+MIT License © 2026 [vst](https://github.com/vst93)
