@@ -72,7 +72,7 @@ jobs:
           if [ "$GOOS" = "windows" ]; then
             OUTPUT="${{ env.BINARY_PREFIX }}.exe"
           elif [ "$GOOS" = "android" ]; then
-            OUTPUT="${{ env.BINARY_PREFIX }}-$GOARCH"
+            OUTPUT="${{ env.BINARY_PREFIX }}"
           else
             OUTPUT="${{ env.BINARY_PREFIX }}"
           fi
@@ -85,7 +85,7 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}.exe"
           elif [ "${{ matrix.goos }}" = "android" ]; then
-            zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}-${{ matrix.goarch }}"
+            zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}"
           else
             zip "${ZIPNAME}.zip" "${{ env.BINARY_PREFIX }}"
           fi

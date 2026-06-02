@@ -5,3 +5,4 @@ smallFileSync/smallFileSync
 /sfs
 /dist/
 *.exe
+.vscode/
