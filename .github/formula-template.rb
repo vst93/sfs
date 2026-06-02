@@ -6,20 +6,20 @@ class Sfs < Formula
 
   if OS.mac?
     if Hardware::CPU.arm?
-      url "https://github.com/vst93/sfs/releases/download/v{{VERSION}}/sfs-darwin-arm64.zip"
+      url "https://github.com/vst93/sfs/releases/download/{{VERSION}}/sfs-darwin-arm64.zip"
       sha256 "{{SHA256_DARWIN_ARM64}}"
     else
-      url "https://github.com/vst93/sfs/releases/download/v{{VERSION}}/sfs-darwin-amd64.zip"
+      url "https://github.com/vst93/sfs/releases/download/{{VERSION}}/sfs-darwin-amd64.zip"
       sha256 "{{SHA256_DARWIN_AMD64}}"
     end
   end
 
   if OS.linux?
     if Hardware::CPU.arm?
-      url "https://github.com/vst93/sfs/releases/download/v{{VERSION}}/sfs-linux-arm64.zip"
+      url "https://github.com/vst93/sfs/releases/download/{{VERSION}}/sfs-linux-arm64.zip"
       sha256 "{{SHA256_LINUX_ARM64}}"
     else
-      url "https://github.com/vst93/sfs/releases/download/v{{VERSION}}/sfs-linux-amd64.zip"
+      url "https://github.com/vst93/sfs/releases/download/{{VERSION}}/sfs-linux-amd64.zip"
       sha256 "{{SHA256_LINUX_AMD64}}"
     end
   end
