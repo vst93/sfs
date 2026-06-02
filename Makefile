@@ -6,7 +6,7 @@ BUILD_DIR := dist
 GO := go
 
 # Version (override with: make build VERSION=1.2.3)
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 
 ## build: Compile the binary
 build:

@@ -46,7 +46,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          # Strip leading "v" if present (supports both "v0.2.0" and "0.2.0" tags)
+          VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
           OUTPUT="${{ env.BINARY_PREFIX }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           if [ "${{ matrix.goos }}" = "windows" ]; then
             go build -ldflags "${{ env.LD_FLAGS }}${VERSION}" -o "${OUTPUT}.exe" .
@@ -93,8 +94,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          TAG="v${VERSION}"
+          # Use the release tag directly for gh release download
+          TAG="${GITHUB_REF_NAME}"
           mkdir -p sha256
 
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
@@ -115,7 +116,8 @@ jobs:
 
       - name: Generate formula
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          # Strip leading "v" for version string in formula
+          VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
 
           sed -e "s/{{VERSION}}/${VERSION}/g" \
               -e "s/{{SHA256_LINUX_AMD64}}/${{ env.SHA_LINUX_AMD64 }}/g" \
@@ -128,7 +130,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's/^v//')"
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
