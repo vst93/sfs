@@ -155,12 +155,12 @@ download_file() {
         wget -q -O "$output_file" "$url"
     else
         log_error "curl or wget is required for downloading"
-        exit 1
+        return 1
     fi
 
     if [ ! -s "$output_file" ]; then
         log_error "Download failed or file is empty: $url"
-        exit 1
+        return 1
     fi
 }
 
@@ -368,8 +368,8 @@ install_binary() {
 
     binary_path="$extracted_dir/$BINARY_NAME"
     if [ ! -f "$binary_path" ]; then
-        # Handle case where binary is nested in a subdirectory
-        binary_path="$(find "$extracted_dir" -name "$BINARY_NAME" -type f | head -n 1)"
+        # Handle case where binary is nested in a subdirectory or has .exe suffix
+        binary_path="$(find "$extracted_dir" \( -name "$BINARY_NAME" -o -name "${BINARY_NAME}.exe" \) -type f | head -n 1)"
         if [ -z "$binary_path" ]; then
             log_error "Binary '$BINARY_NAME' not found in archive"
             exit 1

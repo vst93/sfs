@@ -22,15 +22,16 @@ build-all: $(PLATFORMS)
 
 $(PLATFORMS):
 	@GOOS=$(word 1,$(subst -, ,$@)) GOARCH=$(word 2,$(subst -, ,$@)) \
-		EXT="" CGO_ENABLED=0 \
+		EXT=$$(case "$(word 1,$(subst -, ,$@))" in windows) echo ".exe";; *) echo "";; esac) && \
 		OUTPUT="$(BUILD_DIR)/$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@))$${EXT}" && \
 		echo "Building $$OUTPUT..." && \
 		GOOS=$(word 1,$(subst -, ,$@)) GOARCH=$(word 2,$(subst -, ,$@)) CGO_ENABLED=0 \
-			$(GO) build -ldflags "-s -w -X smallFileSync/model.AppVersion=$(VERSION)" -o "$$OUTPUT" . && \
+			$(GO) build -ldflags "-s -w -X smallFileSync/internal/model.AppVersion=$(VERSION)" -o "$$OUTPUT" . && \
 		cd $(BUILD_DIR) && \
-		zip "$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@)).zip" "$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@))$${EXT}" && \
-		sha256sum "$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@)).zip" | awk '{print $$1}' > "$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@)).zip.sha256" && \
-		echo "Archived: $(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@)).zip"
+		ZIPNAME="$(BINARY_NAME)-$(word 1,$(subst -, ,$@))-$(word 2,$(subst -, ,$@)).zip" && \
+		zip "$$ZIPNAME" "$${OUTPUT##*/}" && \
+		sha256sum "$$ZIPNAME" | awk '{print $$1}' > "$$ZIPNAME.sha256" && \
+		echo "Archived: $$ZIPNAME"
 
 # Windows special case (handled in build-all via PLATFORMS iteration, EXT set above)
 
