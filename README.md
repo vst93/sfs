@@ -46,6 +46,7 @@ SFS (SmallFileSync) is a file sync tool built on WebDAV, supporting both a **ter
 - **Auto Sync** — Configurable automatic sync countdown
 - **Dual Interface** — Terminal TUI + Web UI, choose your preferred workflow
 - **i18n** — Switch Chinese/English with `L` key (terminal) or browser language
+- **Config Export/Import** — Export settings as a shareable CLI command (`Ctrl+B` in settings), import via `sfs --import-config <base64>` on another machine
 - **Data Migration** — Auto-migrates legacy uTools plugin data
 - **Platform** — Linux, macOS, Windows, Android (via Termux)
 
@@ -121,6 +122,7 @@ Config files stored in `~/.config/small-filesync/` (Linux), `~/Library/Applicati
 | `dirmap_<uid>.json` | Local directory mappings (per machine) |
 | `filestate_<uid>.json` | File sync states (MD5, mtime) |
 | `uid` | Machine unique identifier |
+| `export-command.txt` | Exported import command (generated on `Ctrl+B`) |
 
 `settings.json` example (Jianguoyun):
 
@@ -152,6 +154,22 @@ Config files stored in `~/.config/small-filesync/` (Linux), `~/Library/Applicati
 | `o` | Toggle auto sync | `r` | Refresh |
 | `Ctrl+Y` | Copy file path | `L` | Switch language |
 | `?` | Help | `q` | Quit |
+
+**Settings view:**
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+B` | Export config (copies CLI command to clipboard, also saved to `~/.config/small-filesync/export-command.txt`) |
+| `t` | Test WebDAV connection |
+| `p` | Toggle password visibility |
+
+**Config import:**
+
+```bash
+sfs --import-config <base64-encoded-json>
+```
+
+The command will decode and display the configuration details (password masked), prompt for confirmation, and save to `~/.config/small-filesync/settings.json` on approval.
 
 ### File Status
 
@@ -190,6 +208,7 @@ Config files stored in `~/.config/small-filesync/` (Linux), `~/Library/Applicati
 |---------|------|-------------|
 | `sfs` | Terminal | Interactive TUI (Bubble Tea / Lipgloss) |
 | `sfs web [port]` | Web | Browser-based UI (default port 8080) |
+| `sfs --import-config <base64>` | CLI | Import configuration from base64-encoded JSON |
 
 Remote storage layout:
 
@@ -247,6 +266,7 @@ SFS (SmallFileSync) 是一款基于 WebDAV 的文件同步工具，使用 Go 构
 - **自动同步** — 可配置的自动同步倒计时
 - **双界面** — 终端 TUI + Web 浏览器界面，自由选择使用方式
 - **国际化** — `L` 键一键切换中英文界面
+- **配置导入导出** — 在设置页按 `Ctrl+B` 导出配置为可分享的 CLI 命令，其他机器通过 `sfs --import-config <base64>` 导入
 - **数据迁移** — 自动迁移旧版 uTools 插件数据
 - **多平台** — Linux、macOS、Windows、Android（通过 Termux）
 
@@ -322,6 +342,7 @@ sfs web 3000   # 指定自定义端口
 | `dirmap_<uid>.json` | 本地目录映射（按机器 UID 分离） |
 | `filestate_<uid>.json` | 文件同步状态（MD5、修改时间） |
 | `uid` | 机器唯一标识符 |
+| `export-command.txt` | 导出的导入命令（按 `Ctrl+B` 生成） |
 
 `settings.json` 完整示例（以坚果云为例）：
 
@@ -353,6 +374,22 @@ sfs web 3000   # 指定自定义端口
 | `o` | 切换自动同步 | `r` | 刷新 |
 | `Ctrl+Y` | 复制文件路径 | `L` | 切换语言 |
 | `?` | 帮助 | `q` | 退出 |
+
+**设置页：**
+
+| 按键 | 操作 |
+|------|------|
+| `Ctrl+B` | 导出配置（CLI 命令自动复制到剪贴板，同时保存到 `~/.config/small-filesync/export-command.txt`） |
+| `t` | 测试 WebDAV 连接 |
+| `p` | 显示/隐藏密码 |
+
+**配置导入：**
+
+```bash
+sfs --import-config <base64-编码的-json>
+```
+
+命令会解码并展示配置详情（密码掩码显示），确认后写入 `~/.config/small-filesync/settings.json`。
 
 ### 文件状态
 
@@ -391,6 +428,7 @@ sfs web 3000   # 指定自定义端口
 |------|------|------|
 | `sfs` | 终端 | 交互式 TUI (Bubble Tea / Lipgloss) |
 | `sfs web [port]` | Web | 浏览器界面（默认端口 8080） |
+| `sfs --import-config <base64>` | CLI | 从 base64 编码的 JSON 导入配置 |
 
 远程存储布局：
 
