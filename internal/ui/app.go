@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +33,7 @@ const (
 	viewConfirm
 	viewHelp
 	viewNote
+	viewExportConfig
 )
 
 // App is the main Bubble Tea model.
@@ -107,6 +110,10 @@ type App struct {
 	// Update check
 	updateResult *update.CheckResult
 	updateDone   bool // whether the async check has completed
+
+	// Export config
+	exportCommand string
+	exportTempFile  string
 
 	// SetDir state
 	setDirTarget   string
@@ -414,8 +421,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Bracketed paste (e.g. file drag into terminal)
-	if msg.Paste {
+	// Bracketed paste — only treat as file drop on the file list view
+	// (e.g. dragging a file into the terminal)
+	// In other views (add file, settings, etc.), let text inputs handle paste normally.
+	if msg.Paste && a.state == viewFileList {
 		pasted := string(msg.Runes)
 		pasted = strings.TrimSpace(pasted)
 		if pasted != "" {
@@ -448,8 +457,20 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleHelpKey(msg)
 	case viewNote:
 		return a.handleNoteKey(msg)
+	case viewExportConfig:
+		return a.handleExportConfigKey(msg)
 	}
 
+	return a, nil
+}
+
+// handleExportConfigKey handles keys in the export config view.
+func (a *App) handleExportConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "enter":
+		a.state = viewFileList
+		return a, func() tea.Msg { return tea.EnableMouseCellMotion() }
+	}
 	return a, nil
 }
 
@@ -493,7 +514,7 @@ func (a *App) handlePaste(pasted string) (tea.Model, tea.Cmd) {
 
 func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q":
+	case "q", "esc":
 		a.quitting = true
 		return a, tea.Quit
 
@@ -782,7 +803,7 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.state = viewFileList
 		return a, nil
 
-	case "tab":
+	case "tab", "down":
 		a.addFileFocus = (a.addFileFocus + 1) % len(a.addFileInputs)
 		for i := range a.addFileInputs {
 			if i == a.addFileFocus {
@@ -790,6 +811,26 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				a.addFileInputs[i].Blur()
 			}
+		}
+		return a, nil
+
+	case "up":
+		a.addFileFocus = (a.addFileFocus - 1 + len(a.addFileInputs)) % len(a.addFileInputs)
+		for i := range a.addFileInputs {
+			if i == a.addFileFocus {
+				a.addFileInputs[i].Focus()
+			} else {
+				a.addFileInputs[i].Blur()
+			}
+		}
+		return a, nil
+
+	case "ctrl+u":
+		a.addFileInputs[a.addFileFocus].SetValue("")
+		if a.addFileFocus == 0 {
+			a.addFilePath = ""
+			a.addFileStats = nil
+			a.validateAddFilePath()
 		}
 		return a, nil
 
@@ -929,7 +970,7 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.state = viewFileList
 		return a, nil
 
-	case "tab":
+	case "tab", "down":
 		a.settingsFocus = (a.settingsFocus + 1) % len(a.settingsInputs)
 		for i := range a.settingsInputs {
 			if i == a.settingsFocus {
@@ -940,11 +981,34 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case "up":
+		a.settingsFocus = (a.settingsFocus - 1 + len(a.settingsInputs)) % len(a.settingsInputs)
+		for i := range a.settingsInputs {
+			if i == a.settingsFocus {
+				a.settingsInputs[i].Focus()
+			} else {
+				a.settingsInputs[i].Blur()
+			}
+		}
+		return a, nil
+
+	case "ctrl+u":
+		a.settingsInputs[a.settingsFocus].SetValue("")
+		return a, nil
+
 	case "enter":
 		return a.saveSettings()
 
 	case "t":
 		return a.testConnection()
+
+	case "ctrl+b":
+		a.buildExportCommand()
+		a.state = viewExportConfig
+		return a, tea.Batch(
+			a.showToast(i18n.T("export.copied_hint"), "success"),
+			func() tea.Msg { return tea.DisableMouse() },
+		)
 
 	case "p":
 		// Toggle password visibility for the password field (index 2)
@@ -1017,6 +1081,10 @@ func (a *App) handleSetDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case "ctrl+u":
+		a.setDirInput.SetValue("")
+		return a, nil
+
 	default:
 		var cmd tea.Cmd
 		a.setDirInput, cmd = a.setDirInput.Update(msg)
@@ -1076,6 +1144,34 @@ func (a *App) collectSettings() model.AppSettings {
 				BasePath: strings.TrimSpace(a.settingsInputs[3].Value()),
 			},
 		},
+	}
+}
+
+// buildExportCommand serializes the current settings to JSON → base64
+// and constructs the CLI import command, then copies it to clipboard
+// and writes a copy to a temp file as fallback.
+func (a *App) buildExportCommand() {
+	settings := a.collectSettings()
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		a.exportCommand = ""
+		return
+	}
+	encoded := base64.StdEncoding.EncodeToString(data)
+	a.exportCommand = fmt.Sprintf("sfs --import-config %s", encoded)
+	_ = copyToClipboard(a.exportCommand)
+
+	// Write to config dir as fallback for SSH / terminals where selection
+	// doesn't work in alt screen mode.
+	a.exportTempFile = ""
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		cfgDir := filepath.Join(home, ".config", "small-filesync")
+		tmpPath := filepath.Join(cfgDir, "export-command.txt")
+		if err := os.WriteFile(tmpPath, []byte(a.exportCommand+"\n"), 0o644); err == nil {
+			// Store as ~/... form for display
+			a.exportTempFile = strings.Replace(tmpPath, home, "~", 1)
+		}
 	}
 }
 

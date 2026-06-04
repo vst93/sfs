@@ -34,6 +34,8 @@ func (a *App) View() string {
 		body.WriteString(a.renderHelpView())
 	case viewNote:
 		body.WriteString(a.renderNoteView())
+	case viewExportConfig:
+		body.WriteString(a.renderExportConfigView())
 	}
 	if a.toast != "" {
 		body.WriteString("\n")
@@ -660,6 +662,84 @@ func (a *App) renderNoteView() string {
 	b.WriteString(styleMuted.Render("  " + i18n.T("note.hint_close")))
 
 	return b.String()
+}
+
+// ─── Export config view ──────────────────────────────────────────────────────
+
+func (a *App) renderExportConfigView() string {
+	var b strings.Builder
+
+	// ── Title ──
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("  " + i18n.T("export.title")))
+	b.WriteString("\n")
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n\n")
+
+	// ── Copied hint ──
+	b.WriteString("  " + styleSuccess.Render(i18n.T("export.copied_hint")))
+	b.WriteString("\n")
+
+	// ── Temp file fallback ──
+	if a.exportTempFile != "" {
+		b.WriteString("  " + styleMuted.Render(i18n.T("export.temp_file")+": "+a.exportTempFile))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// ── Command box ──
+	b.WriteString("  " + styleMuted.Render(i18n.T("export.command_label")+":"))
+	b.WriteString("\n")
+	boxWidth := min(72, a.width-10)
+	b.WriteString("    " + strings.Repeat("\u2500", boxWidth) + "\n")
+	wrapped := wrapString(a.exportCommand, boxWidth)
+	for _, line := range wrapped {
+		b.WriteString("    " + line + "\n")
+	}
+	b.WriteString("    " + strings.Repeat("\u2500", boxWidth) + "\n")
+	b.WriteString("\n")
+
+	// ── Instruction ──
+	b.WriteString("  " + styleMuted.Render(i18n.T("export.instruction")))
+	b.WriteString("\n\n")
+
+	// ── Security warning ──
+	b.WriteString("  " + styleDanger.Render(i18n.T("export.security_warning")))
+	b.WriteString("\n\n")
+
+	// ── Separator & close hint ──
+	b.WriteString(separator(a.width - 4))
+	b.WriteString("\n")
+	b.WriteString(styleMuted.Render("  " + i18n.T("export.close_hint")))
+
+	return b.String()
+}
+
+// wrapString splits a long string into lines no longer than width,
+// breaking only at spaces (or at width if no space is found).
+func wrapString(s string, width int) []string {
+	if width <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	runes := []rune(s)
+	for len(runes) > width {
+		breakAt := width
+		for i := width; i >= 0; i-- {
+			if runes[i] == ' ' {
+				breakAt = i
+				break
+			}
+		}
+		lines = append(lines, string(runes[:breakAt]))
+		runes = runes[breakAt:]
+		for len(runes) > 0 && runes[0] == ' ' {
+			runes = runes[1:]
+		}
+	}
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
+	}
+	return lines
 }
 
 // ─── Sync result (full-page view) ────────────────────────────────────────────

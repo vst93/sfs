@@ -630,6 +630,7 @@ document.getElementById('addFileBtn').addEventListener('click', function() {
     document.getElementById('addFileNote').value = ''
     document.getElementById('addFileFeedback').style.display = 'none'
     openModal('addFileBg')
+    setTimeout(function() { document.getElementById('addFilePath').focus() }, 80)
 })
 document.getElementById('addFileClose').addEventListener('click', function() { closeModal('addFileBg') })
 document.getElementById('addFileCancel').addEventListener('click', function() { closeModal('addFileBg') })
@@ -698,11 +699,11 @@ document.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPr
 document.addEventListener('dragenter', function(e) { e.preventDefault(); e.stopPropagation(); dragCounter++; document.body.classList.add('drag-over') }, true)
 document.addEventListener('dragleave', function(e) { e.preventDefault(); e.stopPropagation(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; document.body.classList.remove('drag-over') } }, true)
 document.addEventListener('drop', function(e) {
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
     dragCounter = 0
     document.body.classList.remove('drag-over')
     var files = e.dataTransfer && e.dataTransfer.files
     if (!files || files.length === 0) return
+    e.preventDefault()
     var file = files[0]
     var name = file.name || ''
     var size = file.size || 0
@@ -714,7 +715,7 @@ document.addEventListener('drop', function(e) {
     fb.className = 'form-help form-help-warning'
     fb.textContent = '浏览器安全限制无法获取完整路径，请粘贴「' + name + '」的完整本地路径（例如：/Users/xxx/.../' + name + '）'
     openModal('addFileBg')
-    document.getElementById('addFilePath').focus()
+    setTimeout(function() { document.getElementById('addFilePath').focus() }, 80)
 }, true)
 
 // ── Init ──────────────────────────────────────────────────────────────────
