@@ -14,6 +14,7 @@ import (
 	"smallFileSync/internal/update"
 	"smallFileSync/internal/util"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -110,6 +111,8 @@ type App struct {
 	// Update check
 	updateResult *update.CheckResult
 	updateDone   bool // whether the async check has completed
+	updateProgressDownloaded atomic.Int64
+	updateProgressTotal      atomic.Int64
 
 	// Export config
 	exportCommand string
@@ -406,15 +409,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case doUpdateMsg:
-		return a, tea.Batch(a.showToast(i18n.T("update.downloading"), "success"), a.doUpdate())
+		a.updateProgressDownloaded.Store(0)
+		a.updateProgressTotal.Store(0)
+		return a, tea.Batch(a.showToast(i18n.T("update.downloading"), "success"), a.doUpdate(), a.startUpdateProgressTicker())
+
+	case updateProgressMsg:
+		downloaded := a.updateProgressDownloaded.Load()
+		total := a.updateProgressTotal.Load()
+		if total > 0 {
+			pct := float64(downloaded) / float64(total) * 100
+			dlSize := formatFileSize(downloaded)
+			totalSize := formatFileSize(total)
+			msg := fmt.Sprintf("%s / %s (%.1f%%)", dlSize, totalSize, pct)
+			return a, tea.Batch(a.showToast(msg, "success"), a.startUpdateProgressTicker())
+		}
+		return a, a.startUpdateProgressTicker()
 
 	case updateCompleteMsg:
 		if msg.err != nil {
 			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), msg.err.Error()), "error")
 		}
-		// Success: print to stderr and quit (terminal is being restored)
-		fmt.Fprintf(os.Stderr, "\n%s\n", i18n.T("update.success"))
-		return a, tea.Quit
+		// Reset progress
+		a.updateProgressDownloaded.Store(0)
+		a.updateProgressTotal.Store(0)
+		// Show success dialog and quit when user confirms
+		a.state = viewConfirm
+		a.confirmFocus = 0
+		a.confirmTitle = i18n.T("update.success")
+		a.confirmMsg = i18n.T("update.restart_hint")
+		a.confirmLabel = "OK"
+		a.confirmAction = func() tea.Msg {
+			return tea.Quit()
+		}
+		return a, nil
 	}
 
 	return a, nil
@@ -1295,8 +1322,13 @@ func (a *App) doSyncItem(item model.FileRecord) model.SyncDetail {
 		}
 	}
 
-	// Missing local, has remote -> restore
+	// Missing local, has remote -> restore (skip if force_upload)
 	if (!probe.ok || probe.md5 == "") && hasRemote {
+		if syncType == "force_upload" {
+			return model.SyncDetail{
+				FileName: item.FileName, Action: i18n.T("sync.action.upload"), Status: i18n.T("common.failure"), Reason: i18n.T("sync.reason.local_read_failed"),
+			}
+		}
 		if err := storage.SaveFileDataToLocal(a.webdavStore, localPath, item.StorageKey()); err != nil {
 			return model.SyncDetail{
 				FileName: item.FileName, Action: i18n.T("sync.action.download"), Status: i18n.T("common.failure"), Reason: err.Error(),
@@ -1331,7 +1363,8 @@ func (a *App) doSyncItem(item model.FileRecord) model.SyncDetail {
 	}
 
 	// Decide direction
-	shouldDownload := syncType == "force_download" || state.Key == "download" ||
+
+	shouldDownload := syncType == "force_download" || (syncType != "force_upload" && state.Key == "download") ||
 		(syncType != "force_upload" && item.LastChangeTime > 0 && probe.mtime > 0 && probe.mtime < item.LastChangeTime)
 
 	if shouldDownload {
@@ -1558,9 +1591,9 @@ func (a *App) syncRemoteMetadata(item model.FileRecord, localPath string) {
 	}
 	for i := range a.fileList {
 		if a.fileList[i].ID == item.ID && a.fileList[i].FileMD5 != newMD5 {
-		a.fileList[i].FileMD5 = newMD5
-		a.fileList[i].LastChangeTime = time.Now().UnixMilli()
-		break
+			a.fileList[i].FileMD5 = newMD5
+			a.fileList[i].LastChangeTime = time.Now().UnixMilli()
+			break
 		}
 	}
 	_ = a.webdavStore.SaveFileList(a.fileList)
@@ -1665,9 +1698,19 @@ func (a *App) computeFileStateUncached(item model.FileRecord) model.FileStatus {
 	}
 }
 
-// openFileInManager opens a file path in the system file manager.
+// copyToClipboard copies text to clipboard with a timeout to prevent hanging
+// in environments like Termux where clipboard access might not work properly.
 func copyToClipboard(text string) error {
-	return clipboard.WriteAll(text)
+	done := make(chan error, 1)
+	go func() {
+		done <- clipboard.WriteAll(text)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("clipboard operation timed out")
+	}
 }
 
 func openFileInManager(filePath string) error {
@@ -1683,6 +1726,19 @@ func openFileInManager(filePath string) error {
 		return fmt.Errorf("unsupported platform")
 	}
 	return cmd.Start()
+}
+
+func formatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func max(a, b int) int {
@@ -1723,6 +1779,8 @@ func (a *App) moveCursor(target int) {
 
 type doUpdateMsg struct{}
 
+type updateProgressMsg struct{}
+
 type updateCompleteMsg struct {
 	err error
 }
@@ -1758,7 +1816,17 @@ func (a *App) handleUpdate() (tea.Model, tea.Cmd) {
 // doUpdate downloads and applies the update, then quits.
 func (a *App) doUpdate() tea.Cmd {
 	return func() tea.Msg {
-		err := update.DownloadAndUpdate(a.updateResult.DownloadURL)
+		progressFn := func(downloaded, total int64) {
+			a.updateProgressDownloaded.Store(downloaded)
+			a.updateProgressTotal.Store(total)
+		}
+		err := update.DownloadAndUpdate(a.updateResult.DownloadURL, progressFn)
 		return updateCompleteMsg{err: err}
 	}
+}
+
+func (a *App) startUpdateProgressTicker() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return updateProgressMsg{}
+	})
 }

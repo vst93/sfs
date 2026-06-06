@@ -99,11 +99,6 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 		IsBrew: IsBrewInstall(),
 	}
 
-	// If installed via Homebrew, skip API check — user should use brew upgrade.
-	if result.IsBrew {
-		return result
-	}
-
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", repoOwner, repoName)
 
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -148,7 +143,10 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 	for _, asset := range release.Assets {
 		if asset.Name == assetName {
 			result.HasUpdate = true
-			result.DownloadURL = asset.BrowserDownloadURL
+			// For brew installs, don't set DownloadURL — user should use brew upgrade
+			if !result.IsBrew {
+				result.DownloadURL = asset.BrowserDownloadURL
+			}
 			return result
 		}
 	}
@@ -157,9 +155,14 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 	return result
 }
 
+// ProgressCallback is called during download with bytes downloaded and total size.
+// If total is unknown, it will be -1.
+type ProgressCallback func(downloaded, total int64)
+
 // DownloadAndUpdate downloads the release zip for the current platform and
 // replaces the running binary. On Unix it renames the old binary to .old first.
-func DownloadAndUpdate(downloadURL string) error {
+// The progress callback is optional and can be nil.
+func DownloadAndUpdate(downloadURL string, progress ProgressCallback) error {
 	// 1. Create temp directory for the download.
 	tmpDir, err := os.MkdirTemp("", "sfs-update-*")
 	if err != nil {
@@ -169,7 +172,7 @@ func DownloadAndUpdate(downloadURL string) error {
 
 	// 2. Download the zip file.
 	zipPath := filepath.Join(tmpDir, "update.zip")
-	if err := downloadFile(downloadURL, zipPath); err != nil {
+	if err := downloadFile(downloadURL, zipPath, progress); err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
 
@@ -220,7 +223,7 @@ func DownloadAndUpdate(downloadURL string) error {
 }
 
 // downloadFile downloads url to the given local path.
-func downloadFile(url, dest string) error {
+func downloadFile(url, dest string, progress ProgressCallback) error {
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -238,8 +241,31 @@ func downloadFile(url, dest string) error {
 	}
 	defer f.Close()
 
-	_, err = io.Copy(f, resp.Body)
+	if progress != nil {
+		total := resp.ContentLength
+		reader := &progressReader{Reader: resp.Body, total: total, callback: progress}
+		_, err = io.Copy(f, reader)
+	} else {
+		_, err = io.Copy(f, resp.Body)
+	}
 	return err
+}
+
+// progressReader wraps an io.Reader and reports progress.
+type progressReader struct {
+	Reader   io.Reader
+	total    int64
+	current  int64
+	callback ProgressCallback
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.current += int64(n)
+		r.callback(r.current, r.total)
+	}
+	return n, err
 }
 
 // extractBinary finds and extracts the sfs binary from a zip archive.
