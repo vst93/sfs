@@ -109,15 +109,14 @@ func (a *App) renderBottomBar() string {
 		i18n.T("bottom.upload"),
 		i18n.T("bottom.download"),
 		i18n.T("bottom.delete"),
-		i18n.T("bottom.note"),
 		i18n.T("bottom.dir"),
 		i18n.T("bottom.add"),
 		i18n.T("bottom.settings"),
 		i18n.T("bottom.sync_all"),
 		i18n.T("bottom.auto"),
 		i18n.T("bottom.refresh"),
+		i18n.T("bottom.update"),
 		i18n.T("bottom.help"),
-		i18n.T("bottom.lang"),
 		i18n.T("bottom.quit"),
 	}
 	left := " " + strings.Join(parts, " · ") + " "
@@ -339,7 +338,13 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(name)
 	}
 
-	rightS := styleMuted.Render(rightPlain)
+	// Selected row: brighter right-side info; unselected: muted
+	var rightS string
+	if selected {
+		rightS = lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db")).Render(rightPlain)
+	} else {
+		rightS = styleMuted.Render(rightPlain)
+	}
 
 	cursorS := "   "
 	if selected {
@@ -373,9 +378,11 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 
 	line := "       " + strings.Join(parts, " · ")
 	if len(line) > a.width {
-		line = line[:a.width-1] + "..."
+		line = line[:a.width-1] + "…"
 	}
-	return styleMuted.Render(line)
+	// Pass selected flag from call site — we always show detail only for the selected row,
+	// so use a distinct soft-blue so it doesn't clash with the white-highlighted filename.
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#8baccc")).Render(line)
 }
 
 func (a *App) countStats() (total, matched, pending, unbound int) {

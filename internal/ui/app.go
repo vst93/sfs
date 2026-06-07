@@ -759,6 +759,7 @@ func (a *App) handleSetDir() (tea.Model, tea.Cmd) {
 		cwd, _ := os.Getwd()
 		a.setDirInput.SetValue(cwd)
 	}
+	a.setDirInput.CursorEnd()
 	a.setDirInput.Focus()
 	a.setDirFeedback = ""
 	return a, nil
