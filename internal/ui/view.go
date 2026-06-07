@@ -429,6 +429,43 @@ func (a *App) renderEmpty() string {
 
 func (a *App) renderAddFile() string {
 	var b strings.Builder
+
+	if a.addFileEditMode {
+		// ── Edit mode: directory + note, no path validation ──
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("edit_file.title")))
+		b.WriteString("\n")
+		b.WriteString(separator(a.width - 4))
+		b.WriteString("\n\n")
+
+		labelStyle := lipgloss.NewStyle().Foreground(colorMuted).Width(6)
+
+		// Directory field
+		if a.addFileFocus == 0 {
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
+		} else {
+			b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
+		}
+		b.WriteString(a.addFileInputs[0].View())
+		b.WriteString("\n")
+
+		// Note field
+		if a.addFileFocus == 1 {
+			b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
+		} else {
+			b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
+		}
+		b.WriteString(a.addFileInputs[1].View())
+		if a.addFileFeedback != "" {
+			b.WriteString("\n\n  " + a.addFileFeedback)
+		}
+		b.WriteString("\n\n")
+		b.WriteString(separator(a.width - 4))
+		b.WriteString("\n")
+		b.WriteString(styleMuted.Render(i18n.T("edit_file.hint")))
+		return b.String()
+	}
+
+	// ── Add mode: path + note with validation ──
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("add_file.title")))
 	b.WriteString("\n")
 	b.WriteString(separator(a.width - 4))

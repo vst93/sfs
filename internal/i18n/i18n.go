@@ -197,7 +197,12 @@ var translations = map[Locale]map[string]string{
 		"add_file.added":              "已添加「%s」",
 		"add_file.added_continue":     "✓ 已添加「%s」，继续添加下一个",
 
-		// ── Set directory view ──────────────────────────────────────────────
+		// ── Edit file view ────────────────────────────────────────────────────
+		"edit_file.title":             " ✏ 编辑文件",
+		"edit_file.hint":              "  ↑↓/Tab 切换 · Enter 确认 · Ctrl+Y 复制 · Esc 返回",
+		"edit_file.saved":             "「%s」编辑已保存",
+
+		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 设置本地目录",
 		"set_dir.label":           "路径",
 		"set_dir.placeholder":     "输入本地目录路径",
@@ -496,7 +501,12 @@ var translations = map[Locale]map[string]string{
 		"add_file.added":              "Added \"%s\"",
 		"add_file.added_continue":     "✓ Added \"%s\", continue adding next",
 
-		// ── Set directory view ──────────────────────────────────────────────
+		// ── Edit file view ────────────────────────────────────────────────────
+		"edit_file.title":             " ✏ Edit File",
+		"edit_file.hint":              "  ↑↓/Tab Switch · Enter Confirm · Ctrl+Y Copy · Esc Back",
+		"edit_file.saved":             "\"%s\" saved",
+
+		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 Set Local Directory",
 		"set_dir.label":           "Path",
 		"set_dir.placeholder":     "Enter local directory path",

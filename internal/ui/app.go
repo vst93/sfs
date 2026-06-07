@@ -69,6 +69,10 @@ type App struct {
 	addFileFeedback string
 	addFileErr      bool
 
+	// Edit mode (reuses add-file view)
+	addFileEditMode bool
+	addFileEditID   string
+
 	// Settings state
 	settingsInputs   []textinput.Model
 	settingsFocus    int
@@ -617,9 +621,9 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleDelete()
 
 	case "e":
-		// e = Edit directory
+		// e = Edit directory + note (reuses add-file view)
 		if len(a.fileList) > 0 {
-			return a.handleSetDir()
+			return a.handleEditFile()
 		}
 
 	// ── Sync actions ──
@@ -743,6 +747,33 @@ func (a *App) handleDelete() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+func (a *App) handleEditFile() (tea.Model, tea.Cmd) {
+	if len(a.fileList) == 0 {
+		return a, nil
+	}
+	item := a.fileList[a.cursor]
+	a.state = viewAddFile
+	a.addFileEditMode = true
+	a.addFileEditID = item.ID
+	a.addFileFocus = 0 // start on directory field
+	a.addFilePath = ""
+	a.addFileStats = nil
+	a.addFileFeedback = ""
+	a.addFileErr = false
+	// Pre-fill with existing values
+	if dir := a.localDirMap[item.ID]; dir != "" {
+		a.addFileInputs[0].SetValue(dir)
+	} else {
+		cwd, _ := os.Getwd()
+		a.addFileInputs[0].SetValue(cwd)
+	}
+	a.addFileInputs[0].CursorEnd()
+	a.addFileInputs[1].SetValue(item.Note)
+	a.addFileInputs[1].CursorEnd()
+	a.addFileInputs[0].Focus()
+	return a, nil
+}
+
 func (a *App) handleSetDir() (tea.Model, tea.Cmd) {
 	if len(a.fileList) == 0 {
 		return a, nil
@@ -863,6 +894,52 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "enter":
+		if a.addFileEditMode {
+			// Edit mode: save directory + note for existing file
+			idx := a.findFileIndex(a.addFileEditID)
+			if idx < 0 {
+				a.addFileFeedback = ErrorText.Render(i18n.T("error.save_failed"))
+				return a, nil
+			}
+
+			// Save note
+			noteVal := strings.TrimSpace(a.addFileInputs[1].Value())
+			a.fileList[idx].Note = noteVal
+
+			// Save directory
+			dirVal := strings.TrimSpace(a.addFileInputs[0].Value())
+			if dirVal != "" {
+				if strings.HasPrefix(dirVal, "~") {
+					home, _ := os.UserHomeDir()
+					dirVal = filepath.Join(home, dirVal[1:])
+				}
+				info, err := os.Stat(dirVal)
+				if err != nil {
+					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("set_dir.error.not_exist"), dirVal))
+					return a, nil
+				}
+				if !info.IsDir() {
+					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("set_dir.error.not_dir"), dirVal))
+					return a, nil
+				}
+				a.localDirMap[a.addFileEditID] = dirVal
+				if err := a.localStore.SaveLocalDirMap(a.uid, a.localDirMap); err != nil {
+					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
+					return a, nil
+				}
+			}
+
+			// Save file list (with updated note)
+			if err := a.webdavStore.SaveFileList(a.fileList); err != nil {
+				a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
+				return a, nil
+			}
+
+			a.addFileEditMode = false
+			a.addFileEditID = ""
+			a.state = viewFileList
+			return a, a.showToast(fmt.Sprintf(i18n.T("edit_file.saved"), a.fileList[idx].FileName), "success")
+		}
 		return a.submitAddFile(false)
 
 	case "ctrl+s":
