@@ -398,7 +398,7 @@ var translations = map[Locale]map[string]string{
 		"import.field.base_path":   "远端目录",
 
 		// ── Update ──────────────────────────────────────────────────────────
-		"update.available":        "发现新版本 %s，当前版本 %s",
+		"update.available":        "发现新版本 %s，当前版本 %s （按 U 更新）",
 		"update.action":           "更新",
 		"update.downloading":      "正在下载更新...",
 		"update.success":          "更新成功",
@@ -476,7 +476,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.dir":                  "e Edit",
 		"bottom.add":                  "a Add",
 		"bottom.settings":             "s Settings",
-		"bottom.sync_all":             "y All",
+		"bottom.sync_all":             "y Sync All",
 		"bottom.auto":                 "o Auto",
 		"bottom.refresh":              "r Refresh",
 		"bottom.update":               "U Update",
@@ -702,7 +702,7 @@ var translations = map[Locale]map[string]string{
 		"import.field.base_path":   "Remote Path",
 
 		// ── Update ──────────────────────────────────────────────────────────
-		"update.available":        "New version %s available (current: %s)",
+		"update.available":        "New version %s available (current: %s). Press U to update",
 		"update.action":           "Update",
 		"update.downloading":      "Downloading update...",
 		"update.success":          "Update successful",

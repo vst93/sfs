@@ -105,17 +105,9 @@ func (a *App) renderBottomBar() string {
 
 	parts := []string{
 		i18n.T("bottom.navigate"),
-		i18n.T("bottom.sync"),
-		i18n.T("bottom.upload"),
-		i18n.T("bottom.download"),
-		i18n.T("bottom.delete"),
 		i18n.T("bottom.dir"),
 		i18n.T("bottom.add"),
 		i18n.T("bottom.settings"),
-		i18n.T("bottom.sync_all"),
-		i18n.T("bottom.auto"),
-		i18n.T("bottom.refresh"),
-		i18n.T("bottom.update"),
 		i18n.T("bottom.help"),
 		i18n.T("bottom.quit"),
 	}
