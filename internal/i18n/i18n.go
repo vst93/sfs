@@ -83,7 +83,7 @@ func DetectLocale() Locale {
 // T returns the translated string for the given key.
 // Optional args are passed through fmt.Sprintf if the translation contains format verbs.
 func T(key string, args ...any) string {
-	m, ok := translations[currentLocale]
+		m, ok := translations[currentLocale]
 	if !ok {
 		m = translations[Zh]
 	}
@@ -330,7 +330,7 @@ var translations = map[Locale]map[string]string{
 		"help.features.sync_all":  "y  同步全部",
 		"help.features.auto_sync": "o  自动同步",
 		"help.features.refresh":   "r  刷新",
-		"help.features.lang":      "L  切换语言",
+		"help.features.lang":              "L  切换语言",
 		"help.features.quit":      "q  退出",
 		"help.features.update":    "U  检查更新",
 		"help.general":            "通用",
@@ -634,7 +634,7 @@ var translations = map[Locale]map[string]string{
 		"help.features.sync_all":  "y  Sync All",
 		"help.features.auto_sync": "o  Auto Sync",
 		"help.features.refresh":   "r  Refresh",
-		"help.features.lang":      "L  Switch Language",
+		"help.features.lang":              "L  Switch Language",
 		"help.features.quit":      "q  Quit",
 		"help.features.update":    "U  Check for updates",
 		"help.general":            "General",
