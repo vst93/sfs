@@ -187,7 +187,7 @@ var translations = map[Locale]map[string]string{
 		"add_file.placeholder.note":   "备注（可选）",
 		"add_file.path_valid":         "✔ %s  %s",
 		"add_file.path_invalid":       "✕ 路径不可达",
-		"add_file.hint":               "  ↑↓/Tab 切换 · Enter 确认 · Ctrl+y 复制 · Ctrl+u 清空 · Esc 返回 · 也可直接拖入文件",
+		"add_file.hint":               "  ↑↓/Tab 切换 · Enter 确认 · ctrl+y 复制 · ctrl+u 清空 · Esc 返回 · 也可直接拖入文件",
 		"add_file.error.invalid_path": "请输入有效的本地文件路径",
 		"add_file.error.is_dir":       "不支持添加目录，请选择文件",
 		"add_file.error.too_large":    "文件大于200MB，不支持同步",
@@ -199,14 +199,14 @@ var translations = map[Locale]map[string]string{
 
 		// ── Edit file view ────────────────────────────────────────────────────
 		"edit_file.title":             " ✏ 编辑文件",
-		"edit_file.hint":              "  ↑↓/Tab 切换 · Enter 确认 · Ctrl+y 复制 · Esc 返回",
+		"edit_file.hint":              "  ↑↓/Tab 切换 · Enter 确认 · ctrl+y 复制 · Esc 返回",
 		"edit_file.saved":             "「%s」编辑已保存",
 
 		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 设置本地目录",
 		"set_dir.label":           "路径",
 		"set_dir.placeholder":     "输入本地目录路径",
-		"set_dir.hint":            "  Enter 确认 · Ctrl+y 复制 · Ctrl+u 清空 · Esc 返回",
+		"set_dir.hint":            "  Enter 确认 · ctrl+y 复制 · ctrl+u 清空 · Esc 返回",
 		"set_dir.error.empty":     "请输入目录路径",
 		"set_dir.error.not_exist": "路径不存在: %s",
 		"set_dir.error.not_dir":   "不是目录: %s",
@@ -225,7 +225,7 @@ var translations = map[Locale]map[string]string{
 		"settings.base_path_default":     "留空默认 small-file-sync",
 		"settings.password_show":         "[p 显示]",
 		"settings.password_hide":         "[p 隐藏]",
-		"settings.hint":                  "  ↑↓/Tab 切换 · Enter 保存 · t 测试 · p 密码 · Ctrl+b 导出 · Ctrl+y 复制 · Ctrl+u 清空 · Esc 返回",
+		"settings.hint":                  "  ↑↓/Tab 切换 · Enter 保存 · t 测试 · p 密码 · ctrl+b 导出 · ctrl+y 复制 · ctrl+u 清空 · Esc 返回",
 		"settings.hint_lang":             "  Tab 切换  Enter 切换语言  Esc 返回",
 		"settings.error.required":        "WebDAV 需要填写地址、用户名和密码",
 		"settings.test_failed":           "连接测试失败: %s",
@@ -334,7 +334,7 @@ var translations = map[Locale]map[string]string{
 		"help.features.quit":      "q  退出",
 		"help.features.update":    "U  检查更新",
 		"help.general":            "通用",
-		"help.general.copy":       "Ctrl+y  复制路径/输入内容",
+		"help.general.copy":       "ctrl+y  复制路径/输入内容",
 		"help.general.password":   "p  显示/隐藏密码",
 
 		// ── Help hint ────────────────────────────────────────────────────────
@@ -491,7 +491,7 @@ var translations = map[Locale]map[string]string{
 		"add_file.placeholder.note":   "Note (optional)",
 		"add_file.path_valid":         "✔ %s  %s",
 		"add_file.path_invalid":       "✕ Path not accessible",
-		"add_file.hint":               "  ↑↓/Tab Switch · Enter Confirm · Ctrl+y Copy · Ctrl+u Clear · Esc Back · Or drag a file in",
+		"add_file.hint":               "  ↑↓/Tab Switch · Enter Confirm · ctrl+y Copy · ctrl+u Clear · Esc Back · Or drag a file in",
 		"add_file.error.invalid_path": "Please enter a valid local file path",
 		"add_file.error.is_dir":       "Directories not supported, please select a file",
 		"add_file.error.too_large":    "File exceeds 200MB, sync not supported",
@@ -503,14 +503,14 @@ var translations = map[Locale]map[string]string{
 
 		// ── Edit file view ────────────────────────────────────────────────────
 		"edit_file.title":             " ✏ Edit File",
-		"edit_file.hint":              "  ↑↓/Tab Switch · Enter Confirm · Ctrl+y Copy · Esc Back",
+		"edit_file.hint":              "  ↑↓/Tab Switch · Enter Confirm · ctrl+y Copy · Esc Back",
 		"edit_file.saved":             "\"%s\" saved",
 
 		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 Set Local Directory",
 		"set_dir.label":           "Path",
 		"set_dir.placeholder":     "Enter local directory path",
-		"set_dir.hint":            "  Enter Confirm · Ctrl+y Copy · Ctrl+u Clear · Esc Back",
+		"set_dir.hint":            "  Enter Confirm · ctrl+y Copy · ctrl+u Clear · Esc Back",
 		"set_dir.error.empty":     "Please enter a directory path",
 		"set_dir.error.not_exist": "Path does not exist: %s",
 		"set_dir.error.not_dir":   "Not a directory: %s",
@@ -529,7 +529,7 @@ var translations = map[Locale]map[string]string{
 		"settings.base_path_default":     "Default: small-file-sync",
 		"settings.password_show":         "[p Show]",
 		"settings.password_hide":         "[p Hide]",
-		"settings.hint":                  "  ↑↓/Tab Switch · Enter Save · t Test · p Password · Ctrl+b Export · Ctrl+y Copy · Ctrl+u Clear · Esc Back",
+		"settings.hint":                  "  ↑↓/Tab Switch · Enter Save · t Test · p Password · ctrl+b Export · ctrl+y Copy · ctrl+u Clear · Esc Back",
 		"settings.hint_lang":             "  Tab Switch  Enter Toggle Language  Esc Back",
 		"settings.error.required":        "WebDAV requires URL, username, and password",
 		"settings.test_failed":           "Connection test failed: %s",
@@ -638,7 +638,7 @@ var translations = map[Locale]map[string]string{
 		"help.features.quit":      "q  Quit",
 		"help.features.update":    "U  Check for updates",
 		"help.general":            "General",
-		"help.general.copy":       "Ctrl+y  Copy path / input",
+		"help.general.copy":       "ctrl+y  Copy path / input",
 		"help.general.password":   "p  Show/Hide password",
 
 		// ── Help hint ────────────────────────────────────────────────────────
