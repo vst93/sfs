@@ -108,6 +108,10 @@ func (a *App) renderBottomBar() string {
 		i18n.T("bottom.dir"),
 		i18n.T("bottom.add"),
 		i18n.T("bottom.settings"),
+		i18n.T("bottom.update"),
+		i18n.T("bottom.sync_all"),
+		i18n.T("bottom.auto"),
+		i18n.T("bottom.refresh"),
 		i18n.T("bottom.help"),
 		i18n.T("bottom.quit"),
 	}
