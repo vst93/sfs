@@ -72,22 +72,45 @@ brew install vst93/tap/sfs
 **Install script:**
 
 ```bash
-curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
+# Linux / macOS / Termux
+curl -fsSL https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.sh | bash
 ```
 
-Options: `--install-dir /custom/path`, `FORCE_INSTALL=1`, `AUTO_DELETE_INSTALL_SCRIPT=0`
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.ps1 | iex
+```
+
+Options (Linux/macOS/Termux): `--install-dir <dir>`, `--force`, `--skip-github`, `--lang <en|zh>`
+
+Options (Windows): `$env:INSTALL_DIR`, `$env:FORCE_INSTALL=1`, `$env:SKIP_GITHUB=1`, `$env:SFS_LANG=zh`, `$env:NO_SHORTCUTS=1`
+
+**China users (mirror):**
+
+```bash
+# Linux / macOS / Termux (GitHub mirror)
+curl -fsSL https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.sh | bash -s -- --skip-github
+```
+
+```bash
+# Linux / macOS / Termux (jsdelivr CDN)
+curl -fsSL https://cdn.jsdelivr.net/gh/vst93/sfs@main/cmd/install.sh | bash -s -- --skip-github
+```
+
+```powershell
+# Windows PowerShell (GitHub mirror)
+$env:SKIP_GITHUB=1; irm https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.ps1 | iex
+```
+
+```powershell
+# Windows PowerShell (jsdelivr CDN)
+$env:SKIP_GITHUB=1; irm https://cdn.jsdelivr.net/gh/vst93/sfs@main/cmd/install.ps1 | iex
+```
 
 **go install:**
 
 ```bash
 go install github.com/vst93/sfs@latest
-```
-
-**Build from source:**
-
-```bash
-git clone https://github.com/vst93/sfs.git && cd sfs
-go build -o sfs
 ```
 
 ### Quick Start
@@ -292,22 +315,45 @@ brew install vst93/tap/sfs
 **安装脚本：**
 
 ```bash
-curl -fsSL https://github.com/vst93/sfs/releases/latest/download/install.sh | bash
+# Linux / macOS / Termux
+curl -fsSL https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.sh | bash
 ```
 
-可选参数：`--install-dir /自定义路径`、`FORCE_INSTALL=1`、`AUTO_DELETE_INSTALL_SCRIPT=0`
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.ps1 | iex
+```
+
+可选参数 (Linux/macOS/Termux)：`--install-dir <dir>`, `--force`, `--skip-github`, `--lang <en|zh>`
+
+可选参数 (Windows)：`$env:INSTALL_DIR`, `$env:FORCE_INSTALL=1`, `$env:SKIP_GITHUB=1`, `$env:SFS_LANG=zh`, `$env:NO_SHORTCUTS=1`
+
+**国内用户（镜像加速）：**
+
+```bash
+# Linux / macOS / Termux（GitHub 镜像）
+curl -fsSL https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.sh | bash -s -- --skip-github
+```
+
+```bash
+# Linux / macOS / Termux（jsdelivr CDN）
+curl -fsSL https://cdn.jsdelivr.net/gh/vst93/sfs@main/cmd/install.sh | bash -s -- --skip-github
+```
+
+```powershell
+# Windows PowerShell（GitHub 镜像）
+$env:SKIP_GITHUB=1; irm https://raw.githubusercontent.com/vst93/sfs/main/cmd/install.ps1 | iex
+```
+
+```powershell
+# Windows PowerShell（jsdelivr CDN）
+$env:SKIP_GITHUB=1; irm https://cdn.jsdelivr.net/gh/vst93/sfs@main/cmd/install.ps1 | iex
+```
 
 **go install：**
 
 ```bash
 go install github.com/vst93/sfs@latest
-```
-
-**从源码构建：**
-
-```bash
-git clone https://github.com/vst93/sfs.git && cd sfs
-go build -o sfs
 ```
 
 ### 快速开始
