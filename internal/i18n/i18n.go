@@ -199,18 +199,19 @@ var translations = map[Locale]map[string]string{
 
 		// ── Edit file view ────────────────────────────────────────────────────
 		"edit_file.title":             " ✏ 编辑文件",
-		"edit_file.hint":              "  ↑↓/Tab 切换 · Enter 确认 · ctrl+y 复制 · Esc 返回",
+		"edit_file.hint":              "  ↑↓/Tab 切换 · Enter 确认 · ctrl+y 复制 · ctrl+u 清空路径并解除关联 · Esc 返回",
 		"edit_file.saved":             "「%s」编辑已保存",
 
 		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 设置本地目录",
 		"set_dir.label":           "路径",
-		"set_dir.placeholder":     "输入本地目录路径",
-		"set_dir.hint":            "  Enter 确认 · ctrl+y 复制 · ctrl+u 清空 · Esc 返回",
+		"set_dir.placeholder":     "输入目录；留空解除本地关联",
+		"set_dir.hint":            "  Enter 确认 · ctrl+y 复制 · ctrl+u 清空并解除关联 · Esc 返回",
 		"set_dir.error.empty":     "请输入目录路径",
 		"set_dir.error.not_exist": "路径不存在: %s",
 		"set_dir.error.not_dir":   "不是目录: %s",
 		"set_dir.saved":           "目录已设置: %s",
+		"set_dir.unbound":         "已解除本地关联（云端记录和本地文件均保留）",
 
 		// ── Settings view ───────────────────────────────────────────────────
 		"settings.title":                 " ⚙  存储设置",
@@ -503,18 +504,19 @@ var translations = map[Locale]map[string]string{
 
 		// ── Edit file view ────────────────────────────────────────────────────
 		"edit_file.title":             " ✏ Edit File",
-		"edit_file.hint":              "  ↑↓/Tab Switch · Enter Confirm · ctrl+y Copy · Esc Back",
+		"edit_file.hint":              "  ↑↓/Tab Switch · Enter Confirm · ctrl+y Copy · ctrl+u Clear path to unlink · Esc Back",
 		"edit_file.saved":             "\"%s\" saved",
 
 		// ── Set directory view ────────────────────────────────────────────────
 		"set_dir.title":           " 📂 Set Local Directory",
 		"set_dir.label":           "Path",
-		"set_dir.placeholder":     "Enter local directory path",
-		"set_dir.hint":            "  Enter Confirm · ctrl+y Copy · ctrl+u Clear · Esc Back",
+		"set_dir.placeholder":     "Enter a directory; leave empty to unlink",
+		"set_dir.hint":            "  Enter Confirm · ctrl+y Copy · ctrl+u Clear and unlink · Esc Back",
 		"set_dir.error.empty":     "Please enter a directory path",
 		"set_dir.error.not_exist": "Path does not exist: %s",
 		"set_dir.error.not_dir":   "Not a directory: %s",
 		"set_dir.saved":           "Directory set: %s",
+		"set_dir.unbound":         "Local link removed (remote record and local file kept)",
 
 		// ── Settings view ───────────────────────────────────────────────────
 		"settings.title":                 " ⚙  Storage Settings",

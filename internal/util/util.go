@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -37,6 +38,37 @@ func FileSeparator() string {
 		return "\\"
 	}
 	return "/"
+}
+
+// ExpandUserPath expands a leading ~/ (or ~\ on Windows) using the current
+// user's home directory. Other tilde forms such as ~other-user are unchanged.
+func ExpandUserPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path != "~" && (len(path) < 2 || path[0] != '~' || !os.IsPathSeparator(path[1])) {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
+
+// NormalizeLocalPath expands the home directory and resolves relative paths
+// against the current working directory before storing them.
+func NormalizeLocalPath(path string) (string, error) {
+	path = ExpandUserPath(path)
+	if path == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
 }
 
 // CurrentUsername returns the current OS username.

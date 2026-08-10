@@ -24,7 +24,11 @@ func UtoolsMigrate() (uid string, settings model.AppSettings, dirMap map[string]
 	db, err := leveldb.OpenFile(dbPath, nil)
 	if err != nil {
 		// DB is locked if uTools is running - try to copy it first
-		tmpPath := filepath.Join(os.TempDir(), "smallfs-utools-db-copy")
+		tmpPath, tempErr := os.MkdirTemp("", "smallfs-utools-db-copy-")
+		if tempErr != nil {
+			return "", model.DefaultSettings(), nil, nil, fmt.Errorf(i18n.T("migrate.db_copy_failed"), tempErr)
+		}
+		defer os.RemoveAll(tmpPath)
 		if copyErr := copyLevelDBDir(dbPath, tmpPath); copyErr != nil {
 			return "", model.DefaultSettings(), nil, nil, fmt.Errorf(i18n.T("migrate.db_locked"), err)
 		}
@@ -32,7 +36,6 @@ func UtoolsMigrate() (uid string, settings model.AppSettings, dirMap map[string]
 		if err != nil {
 			return "", model.DefaultSettings(), nil, nil, fmt.Errorf(i18n.T("migrate.db_copy_failed"), err)
 		}
-		defer os.RemoveAll(tmpPath)
 	}
 	defer db.Close()
 
@@ -253,8 +256,7 @@ func findByID(entries []map[string]interface{}, id string) map[string]interface{
 
 // copyLevelDBDir copies a LevelDB directory to a temp location.
 func copyLevelDBDir(src, dst string) error {
-	os.RemoveAll(dst)
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := os.MkdirAll(dst, 0o700); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(src)
@@ -271,7 +273,7 @@ func copyLevelDBDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+		if err := os.WriteFile(dstPath, data, 0o600); err != nil {
 			return err
 		}
 	}

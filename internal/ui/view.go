@@ -2,9 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"smallFileSync/internal/i18n"
 	"smallFileSync/internal/model"
-	"smallFileSync/internal/util"
 	"strings"
 	"time"
 
@@ -358,7 +358,7 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 	localDir := a.localDirMap[item.ID]
 	fullPath := ""
 	if localDir != "" {
-		fullPath = localDir + "/" + item.FileName
+		fullPath = filepath.Join(localDir, item.FileName)
 	}
 
 	parts := []string{}
@@ -680,7 +680,7 @@ func (a *App) renderNoteView() string {
 	b.WriteString("\n")
 	dir := a.localDirMap[item.ID]
 	if dir != "" {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + dir + util.FileSeparator() + item.FileName)
+		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + filepath.Join(dir, item.FileName))
 	} else {
 		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + i18n.T("file_list.no_dir"))
 	}

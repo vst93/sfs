@@ -150,6 +150,7 @@ body.drag-over::after { content: '松开即可添加文件'; position: fixed; in
             </div>
             <div class="toolbar-actions">
                 <button id="addFileBtn" type="button" class="btn btn-primary" title="添加本地文件到同步列表"><span>⊕</span><span>添加</span></button>
+                <button id="refreshBtn" type="button" class="btn btn-secondary" title="刷新文件列表"><span>↻</span><span>刷新</span></button>
                 <button id="syncAllBtn" type="button" class="btn btn-secondary" title="同步全部文件"><span>⟳</span><span>同步全部</span></button>
                 <button id="storageSettingsBtn" type="button" class="btn btn-secondary" title="配置存储设置"><span>存储设置</span></button>
                 <label class="toggle-field" for="autoSyncBtn" title="开启后每60秒自动同步">
@@ -183,7 +184,7 @@ body.drag-over::after { content: '松开即可添加文件'; position: fixed; in
     <div class="modal-panel">
         <div class="modal-header"><div><h3>添加同步文件</h3><p>输入本地完整路径，单文件不能超过 200MB。</p></div><button type="button" class="icon-btn" id="addFileClose">×</button></div>
         <div class="modal-body">
-            <div class="form-field"><label>文件路径</label><input type="text" id="addFilePath" class="text-input" placeholder="例如：/Users/name/config.json"></div>
+            <div class="form-field"><label>文件路径</label><input type="text" id="addFilePath" class="text-input" placeholder="例如：/Users/name/config.json 或 C:\Users\name\config.json"></div>
             <div class="form-field"><label>文件备注</label><input type="text" id="addFileNote" class="text-input" placeholder="可选备注（50字以内）" maxlength="50"></div>
             <div id="addFileFeedback" class="form-help" style="display:none"></div>
             <div class="modal-actions"><button type="button" class="btn btn-primary" id="addFileSubmit">添加</button><button type="button" class="btn btn-secondary" id="addFileCancel">取消</button></div>
@@ -241,10 +242,11 @@ let syncing = false
 let autoSyncCountdown = 60
 let confirmResolve = null
 let modalOpen = false   // track if any modal is open to prevent double-trigger
+let stateLoadSeq = 0
 
 // ── API helpers ───────────────────────────────────────────────────────────
 async function api(path, opts) {
-    const res = await fetch('/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts })
+    const res = await fetch('/api' + path, { cache: 'no-store', headers: { 'Content-Type': 'application/json' }, ...opts })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Request failed')
     return data
@@ -414,21 +416,23 @@ document.getElementById('fileListBody').addEventListener('click', async function
 
 // ── Load state ────────────────────────────────────────────────────────────
 async function loadState() {
-    try {
-        const data = await api('/files')
-        fileList = data.files || []
+    const seq = ++stateLoadSeq
+    const results = await Promise.allSettled([api('/files'), api('/settings')])
+    if (seq !== stateLoadSeq) return false
+    if (results[0].status === 'fulfilled') {
+        fileList = results[0].value.files || []
         showList()
-    } catch (e) {
-        console.error(e)
+    } else {
+        console.error(results[0].reason)
     }
-    try {
-        const data = await api('/settings')
-        appSettings = data.settings
+    if (results[1].status === 'fulfilled') {
+        appSettings = results[1].value.settings
         document.getElementById('autoSyncBtn').checked = appSettings.autoSync || false
-        fillStorageForm()
-    } catch (e) {
-        console.error(e)
+        if (document.getElementById('storageBg').style.display !== 'block') fillStorageForm()
+    } else {
+        console.error(results[1].reason)
     }
+    return results[0].status === 'fulfilled' && results[1].status === 'fulfilled'
 }
 
 // ── Storage settings ──────────────────────────────────────────────────────
@@ -476,11 +480,7 @@ async function doAddFile() {
 }
 
 async function doDeleteFile(id) {
-    document.getElementById('confirmTitle').textContent = '确认删除同步记录'
-    document.getElementById('confirmMessage').textContent = '将删除云端保存的同步内容与记录，本地文件不会删除。'
-    document.getElementById('confirmOk').textContent = '删除记录'
-    openModal('confirmBg')
-    const ok = await new Promise(r => { confirmResolve = r })
+    const ok = await askConfirmation('确认删除同步记录', '将删除云端保存的同步内容与记录，本地文件不会删除。', '删除记录')
     if (!ok) return
     try {
         await api('/files/delete', { method: 'POST', body: JSON.stringify({ id }) })
@@ -490,11 +490,19 @@ async function doDeleteFile(id) {
 }
 
 async function doSetDir(id) {
-    const dir = prompt('请输入本地目录路径：')
-    if (!dir) return
+    const item = fileList.find(x => x.id === id)
+    if (!item) { showToast('未找到同步记录，请刷新后重试', 'error'); return }
+    const dir = prompt('请输入本地目录路径。清空后确认可解除本机关联；云端记录和本地文件不会删除。', item.localDir || '')
+    if (dir === null) return
+    const normalized = dir.trim()
+    if (!normalized && !item.localDir) { showToast('当前文件尚未关联本地目录', 'warning'); return }
+    if (!normalized) {
+        const ok = await askConfirmation('解除本地关联', '只清除此设备上的目录关联和同步基线。云端记录及本地文件都会保留。', '解除关联')
+        if (!ok) return
+    }
     try {
-        await api('/files/dir', { method: 'POST', body: JSON.stringify({ id, dir }) })
-        showToast('目录已设置', 'success')
+        await api('/files/dir', { method: 'POST', body: JSON.stringify({ id, dir: normalized }) })
+        showToast(normalized ? '目录已设置' : '已解除本地关联', normalized ? 'success' : 'warning')
         await loadState()
     } catch (e) { showToast(e.message, 'error') }
 }
@@ -577,6 +585,14 @@ function showSyncProgress(text) {
 }
 function hideSyncProgress() { document.getElementById('syncProgress').style.display = 'none' }
 
+function askConfirmation(title, message, label) {
+    document.getElementById('confirmTitle').textContent = title
+    document.getElementById('confirmMessage').textContent = message
+    document.getElementById('confirmOk').textContent = label
+    openModal('confirmBg')
+    return new Promise(r => { confirmResolve = r })
+}
+
 // ── Modal helpers ─────────────────────────────────────────────────────────
 function openModal(id) {
     document.getElementById(id).style.display = 'block'
@@ -638,6 +654,11 @@ document.getElementById('addFileSubmit').addEventListener('click', function() { 
 document.getElementById('addFileBg').addEventListener('click', function(e) { if (e.target === e.currentTarget) closeModal('addFileBg') })
 
 document.getElementById('emptyStateBtn').addEventListener('click', function() { document.getElementById('addFileBtn').click() })
+
+document.getElementById('refreshBtn').addEventListener('click', async function() {
+    const ok = await loadState()
+    showToast(ok ? '列表已刷新' : '刷新失败，请检查存储连接', ok ? 'success' : 'error')
+})
 
 document.getElementById('syncAllBtn').addEventListener('click', function() { doSyncAll() })
 

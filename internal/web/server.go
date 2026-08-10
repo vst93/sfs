@@ -1,8 +1,8 @@
 package web
 
 import (
-	"encoding/json"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -117,7 +117,7 @@ func (s *Server) buildFileListItem(item model.FileRecord) fileListItem {
 	localPath := ""
 	hasLocal := false
 	if localDir != "" {
-		localPath = localDir + util.FileSeparator() + item.FileName
+		localPath = filepath.Join(localDir, item.FileName)
 		_, err := os.Stat(localPath)
 		hasLocal = err == nil
 	}
@@ -225,12 +225,12 @@ func (s *Server) Start(port int) error {
 	fsHandler := http.FileServer(http.FS(sub))
 	mux.Handle("/", fsHandler)
 
-	addr := fmt.Sprintf(":%d", port)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		// Port occupied, try auto-find a free port
 		fmt.Printf("Port %d is occupied, finding an available port...\n", port)
-		ln, err = net.Listen("tcp", ":0")
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return fmt.Errorf("failed to find an available port: %w", err)
 		}
@@ -265,6 +265,7 @@ func openBrowser(url string) {
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
@@ -288,10 +289,13 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	var refreshErr error
 	// Refresh file list from remote if configured
 	if s.isStorageConfigured() {
 		list, err := s.webdavStore.GetFileList()
-		if err == nil {
+		if err != nil {
+			refreshErr = err
+		} else {
 			var normalized []model.FileRecord
 			for _, r := range list {
 				if r.ID != "" && r.FileName != "" {
@@ -301,7 +305,13 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 			s.fileList = normalized
 		}
 	}
+	s.localDirMap = s.localStore.GetLocalDirMap(s.uid)
+	s.stateMap = s.localStore.GetFileStateMap(s.uid)
 	s.mu.Unlock()
+	if refreshErr != nil {
+		writeError(w, http.StatusBadGateway, "刷新文件列表失败: "+refreshErr.Error())
+		return
+	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -361,10 +371,11 @@ func (s *Server) handleAddFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Expand ~
-	if strings.HasPrefix(req.FilePath, "~") {
-		home, _ := os.UserHomeDir()
-		req.FilePath = filepath.Join(home, req.FilePath[1:])
+	if normalized, normalizeErr := util.NormalizeLocalPath(req.FilePath); normalizeErr == nil {
+		req.FilePath = normalized
+	} else {
+		writeError(w, 400, "文件路径无效")
+		return
 	}
 
 	info, err := os.Stat(req.FilePath)
@@ -448,13 +459,16 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	item := s.fileList[idx]
-	_ = s.webdavStore.RemoveFile(item.StorageKey())
-
-	s.fileList = append(s.fileList[:idx], s.fileList[idx+1:]...)
-	if err := s.webdavStore.SaveFileList(s.fileList); err != nil {
+	updatedList := append([]model.FileRecord(nil), s.fileList[:idx]...)
+	updatedList = append(updatedList, s.fileList[idx+1:]...)
+	if err := s.webdavStore.SaveFileList(updatedList); err != nil {
 		writeError(w, 500, "保存文件列表失败: "+err.Error())
 		return
 	}
+	s.fileList = updatedList
+	// Metadata is authoritative. Remove content afterwards so a failed metadata
+	// write can never leave a visible record whose remote data was destroyed.
+	_ = s.webdavStore.RemoveFile(item.StorageKey())
 
 	delete(s.localDirMap, item.ID)
 	delete(s.stateMap, item.ID)
@@ -484,11 +498,13 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 
 	for i := range s.fileList {
 		if s.fileList[i].ID == req.ID {
-			s.fileList[i].Note = strings.TrimSpace(req.Note)
-			if err := s.webdavStore.SaveFileList(s.fileList); err != nil {
+			updatedList := append([]model.FileRecord(nil), s.fileList...)
+			updatedList[i].Note = strings.TrimSpace(req.Note)
+			if err := s.webdavStore.SaveFileList(updatedList); err != nil {
 				writeError(w, 500, "保存失败")
 				return
 			}
+			s.fileList = updatedList
 			writeJSON(w, 200, map[string]string{"message": "已更新"})
 			return
 		}
@@ -513,16 +529,36 @@ func (s *Server) handleSetDir(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	dirPath := strings.TrimSpace(req.Dir)
-	if dirPath == "" {
-		writeError(w, 400, "目录路径不能为空")
+	found := false
+	for _, item := range s.fileList {
+		if item.ID == req.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, 404, "未找到记录")
 		return
 	}
 
-	if strings.HasPrefix(dirPath, "~") {
-		home, _ := os.UserHomeDir()
-		dirPath = filepath.Join(home, dirPath[1:])
+	dirPath := strings.TrimSpace(req.Dir)
+	if dirPath == "" {
+		if _, ok := s.localDirMap[req.ID]; !ok {
+			writeJSON(w, 200, map[string]string{"message": "本地关联已是空"})
+			return
+		}
+		if err := s.setLocalDirLocked(req.ID, ""); err != nil {
+			writeError(w, 500, "解除本地关联失败")
+			return
+		}
+		writeJSON(w, 200, map[string]string{"message": "已解除本地关联"})
+		return
+	}
+	if normalized, normalizeErr := util.NormalizeLocalPath(dirPath); normalizeErr == nil {
+		dirPath = normalized
+	} else {
+		writeError(w, 400, "目录路径无效")
+		return
 	}
 
 	info, err := os.Stat(dirPath)
@@ -535,13 +571,49 @@ func (s *Server) handleSetDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.localDirMap[req.ID] = dirPath
-	if err := s.localStore.SaveLocalDirMap(s.uid, s.localDirMap); err != nil {
+	if err := s.setLocalDirLocked(req.ID, dirPath); err != nil {
 		writeError(w, 500, "保存失败")
 		return
 	}
 
 	writeJSON(w, 200, map[string]string{"message": "目录已设置"})
+}
+
+func (s *Server) setLocalDirLocked(id, dir string) error {
+	oldDir, hadOldDir := s.localDirMap[id]
+	oldState, hadOldState := s.stateMap[id]
+	if oldDir == dir {
+		return nil
+	}
+	if dir == "" {
+		delete(s.localDirMap, id)
+	} else {
+		s.localDirMap[id] = dir
+	}
+	delete(s.stateMap, id)
+
+	rollback := func() {
+		if hadOldDir {
+			s.localDirMap[id] = oldDir
+		} else {
+			delete(s.localDirMap, id)
+		}
+		if hadOldState {
+			s.stateMap[id] = oldState
+		} else {
+			delete(s.stateMap, id)
+		}
+	}
+	if err := s.localStore.SaveLocalDirMap(s.uid, s.localDirMap); err != nil {
+		rollback()
+		return err
+	}
+	if err := s.localStore.SaveFileStateMap(s.uid, s.stateMap); err != nil {
+		rollback()
+		_ = s.localStore.SaveLocalDirMap(s.uid, s.localDirMap)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +684,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		writeJSON(w, 200, map[string]interface{}{
-			"settings":  s.settings,
+			"settings":   s.settings,
 			"hasStorage": s.isStorageConfigured(),
 		})
 		return
@@ -620,7 +692,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPost {
 		var req struct {
-			AutoSync bool               `json:"autoSync"`
+			AutoSync bool                `json:"autoSync"`
 			Storage  model.StorageConfig `json:"storage"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -631,14 +703,22 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
-		s.settings.AutoSync = req.AutoSync
-		s.settings.Storage = req.Storage
-		s.webdavStore = storage.NewWebDAVStore(req.Storage.WebDAV)
-
-		if err := s.localStore.SaveSettings(s.settings); err != nil {
+		req.Storage.WebDAV.Endpoint = strings.TrimSpace(req.Storage.WebDAV.Endpoint)
+		req.Storage.WebDAV.Username = strings.TrimSpace(req.Storage.WebDAV.Username)
+		req.Storage.WebDAV.BasePath = strings.TrimSpace(req.Storage.WebDAV.BasePath)
+		if req.Storage.WebDAV.Endpoint == "" || req.Storage.WebDAV.Username == "" || req.Storage.WebDAV.Password == "" {
+			writeError(w, 400, "WebDAV 需要填写地址、用户名和密码")
+			return
+		}
+		newSettings := s.settings
+		newSettings.AutoSync = req.AutoSync
+		newSettings.Storage = req.Storage
+		if err := s.localStore.SaveSettings(newSettings); err != nil {
 			writeError(w, 500, "保存设置失败")
 			return
 		}
+		s.settings = newSettings
+		s.webdavStore = storage.NewWebDAVStore(req.Storage.WebDAV)
 
 		writeJSON(w, 200, map[string]string{"message": "设置已保存"})
 		return
@@ -698,11 +778,12 @@ func (s *Server) doSyncAll(syncType string, isAuto bool) syncResult {
 	}
 
 	for i := range s.fileList {
+		unbound := s.localDirMap[s.fileList[i].ID] == ""
 		detail := s.doSyncItem(i, syncType)
 		result.Summary.Checked++
 		result.Details = append(result.Details, detail)
 
-		if detail.Action == "未处理" {
+		if unbound {
 			result.Summary.Unbound++
 		} else if detail.Status == "成功" {
 			switch detail.Action {
@@ -731,7 +812,7 @@ func (s *Server) doSyncItem(idx int, syncType string) syncDetail {
 		}
 	}
 
-	localPath := localDir + util.FileSeparator() + item.FileName
+	localPath := filepath.Join(localDir, item.FileName)
 	probe := s.probeLocal(localPath)
 	hasRemote := item.LastUploadTime > 0 && item.FileMD5 != "" && item.StorageKey() != ""
 
@@ -821,6 +902,12 @@ func (s *Server) doUpload(item *model.FileRecord, localPath, localMD5, successRe
 	if err != nil {
 		return syncDetail{FileName: item.FileName, Action: "上传", Status: "失败", Reason: err.Error()}
 	}
+	completed := false
+	defer func() {
+		if !completed {
+			_ = s.webdavStore.RemoveFile(fileKey)
+		}
+	}()
 
 	ok, msg := storage.VerifyStoredFileData(s.webdavStore, fileKey, localMD5)
 	if !ok {
@@ -833,21 +920,30 @@ func (s *Server) doUpload(item *model.FileRecord, localPath, localMD5, successRe
 	}
 	newMD5, _ := util.CalculateFileMD5(localPath)
 
-	for i := range s.fileList {
-		if s.fileList[i].ID == item.ID {
-			s.fileList[i].FileID = fileKey
-			s.fileList[i].FileIds = nil
-			s.fileList[i].FileMD5 = newMD5
-			s.fileList[i].LastUploadTime = time.Now().UnixMilli()
-			s.fileList[i].LastUploadUser = util.CurrentUsername()
-			s.fileList[i].LastChangeTime = info.ModTime().UnixMilli()
-			s.fileList[i].Size = float64(info.Size()) / 1024
+	updatedList := append([]model.FileRecord(nil), s.fileList...)
+	for i := range updatedList {
+		if updatedList[i].ID == item.ID {
+			updatedList[i].FileID = fileKey
+			updatedList[i].FileIds = nil
+			updatedList[i].FileMD5 = newMD5
+			updatedList[i].LastUploadTime = time.Now().UnixMilli()
+			updatedList[i].LastUploadUser = util.CurrentUsername()
+			updatedList[i].LastChangeTime = info.ModTime().UnixMilli()
+			updatedList[i].Size = float64(info.Size()) / 1024
 			break
 		}
 	}
 
-	if err := s.webdavStore.SaveFileList(s.fileList); err != nil {
+	if err := s.webdavStore.SaveFileList(updatedList); err != nil {
 		return syncDetail{FileName: item.FileName, Action: "上传", Status: "失败", Reason: "保存元数据失败"}
+	}
+	s.fileList = updatedList
+	completed = true
+	if item.LastUploadTime > 0 {
+		oldKey := item.StorageKey()
+		if oldKey != fileKey {
+			_ = s.webdavStore.RemoveFile(oldKey)
+		}
 	}
 
 	s.commitLocalState(item.ID, localPath)

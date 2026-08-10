@@ -96,6 +96,7 @@ type App struct {
 
 	// File state cache: item ID -> file state
 	fileStateCache map[string]model.FileStatus
+	refreshSeq     uint64
 
 	// Last sync time (for status display)
 	lastSyncTime time.Time
@@ -113,14 +114,14 @@ type App struct {
 	toastAt   time.Time
 
 	// Update check
-	updateResult *update.CheckResult
-	updateDone   bool // whether the async check has completed
+	updateResult             *update.CheckResult
+	updateDone               bool // whether the async check has completed
 	updateProgressDownloaded atomic.Int64
 	updateProgressTotal      atomic.Int64
 
 	// Export config
-	exportCommand string
-	exportTempFile  string
+	exportCommand  string
+	exportTempFile string
 
 	// SetDir state
 	setDirTarget   string
@@ -133,6 +134,34 @@ type syncDoneMsg struct{}
 
 type syncStepMsg struct{}
 
+type syncStepDoneMsg struct {
+	detail         model.SyncDetail
+	unbound        bool
+	fileList       []model.FileRecord
+	localStateMap  map[string]model.FileState
+	probeCache     map[string]localProbe
+	fileStateCache map[string]model.FileStatus
+}
+
+type startSyncMsg struct {
+	fileID   string
+	syncType string
+	isAuto   bool
+}
+
+type startDeleteMsg struct {
+	id string
+}
+
+type deleteDoneMsg struct {
+	toast         toastMsg
+	fileList      []model.FileRecord
+	localDirMap   map[string]string
+	localStateMap map[string]model.FileState
+	cursor        int
+	applyNewState bool
+}
+
 type autoSyncTickMsg struct{}
 
 type toastMsg struct {
@@ -142,7 +171,13 @@ type toastMsg struct {
 
 type clearToastMsg struct{}
 
-type fileListRefreshMsg struct{}
+type fileListRefreshMsg struct {
+	seq           uint64
+	fileList      []model.FileRecord
+	localDirMap   map[string]string
+	localStateMap map[string]model.FileState
+	err           error
+}
 
 type periodicRefreshMsg struct{}
 
@@ -256,13 +291,25 @@ func (a *App) checkForUpdate() tea.Cmd {
 }
 
 func (a *App) loadFileList() tea.Cmd {
+	a.refreshSeq++
+	seq := a.refreshSeq
+	configured := a.isStorageConfigured()
+	webdavStore := a.webdavStore
+	localStore := a.localStore
+	uid := a.uid
 	return func() tea.Msg {
-		if !a.isStorageConfigured() {
-			return fileListRefreshMsg{}
+		msg := fileListRefreshMsg{
+			seq:           seq,
+			localDirMap:   localStore.GetLocalDirMap(uid),
+			localStateMap: localStore.GetFileStateMap(uid),
 		}
-		list, err := a.webdavStore.GetFileList()
+		if !configured {
+			return msg
+		}
+		list, err := webdavStore.GetFileList()
 		if err != nil {
-			return toastMsg{text: fmt.Sprintf(i18n.T("error.load_file_list"), err.Error()), typ: "error"}
+			msg.err = err
+			return msg
 		}
 		var normalized []model.FileRecord
 		for _, r := range list {
@@ -270,8 +317,8 @@ func (a *App) loadFileList() tea.Cmd {
 				normalized = append(normalized, model.NormalizeFileRecord(r))
 			}
 		}
-		a.fileList = normalized
-		return fileListRefreshMsg{}
+		msg.fileList = normalized
+		return msg
 	}
 }
 
@@ -358,6 +405,46 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncStepMsg:
 		return a, a.doSyncStep()
 
+	case syncStepDoneMsg:
+		a.fileList = msg.fileList
+		a.localStateMap = msg.localStateMap
+		a.probeCache = msg.probeCache
+		a.fileStateCache = msg.fileStateCache
+		a.lastSyncResult.Summary.Checked++
+		if msg.unbound {
+			a.lastSyncResult.Summary.Unbound++
+		} else if msg.detail.Status == i18n.T("common.success") {
+			switch msg.detail.Action {
+			case i18n.T("sync.action.upload"):
+				a.lastSyncResult.Summary.Uploaded++
+			case i18n.T("sync.action.download"):
+				a.lastSyncResult.Summary.Downloaded++
+			case i18n.T("sync.action.skip"):
+				a.lastSyncResult.Summary.Skipped++
+			}
+		} else {
+			a.lastSyncResult.Summary.Failed++
+		}
+		a.lastSyncResult.Details = append(a.lastSyncResult.Details, msg.detail)
+		return a, func() tea.Msg { return syncStepMsg{} }
+
+	case startSyncMsg:
+		return a, a.runSync(msg.fileID, msg.syncType, msg.isAuto)
+
+	case startDeleteMsg:
+		return a, a.deleteFile(msg.id)
+
+	case deleteDoneMsg:
+		if msg.applyNewState {
+			a.fileList = msg.fileList
+			a.localDirMap = msg.localDirMap
+			a.localStateMap = msg.localStateMap
+			a.cursor = msg.cursor
+			a.fileStateCache = make(map[string]model.FileStatus)
+			a.probeCache = make(map[string]localProbe)
+		}
+		return a, a.showToast(msg.toast.text, msg.toast.typ)
+
 	case autoSyncTickMsg:
 		if a.autoSync && !a.syncing {
 			a.autoCountdown--
@@ -387,10 +474,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.startPeriodicRefresh()
 
 	case fileListRefreshMsg:
+		if msg.seq != a.refreshSeq {
+			return a, nil
+		}
+		a.localDirMap = msg.localDirMap
+		a.localStateMap = msg.localStateMap
+		if msg.err != nil {
+			a.fileStateCache = make(map[string]model.FileStatus)
+			a.probeCache = make(map[string]localProbe)
+			return a, a.showToast(fmt.Sprintf(i18n.T("error.load_file_list"), msg.err.Error()), "error")
+		}
+		a.fileList = msg.fileList
 		if a.cursor >= len(a.fileList) {
 			a.cursor = max(0, len(a.fileList)-1)
 		}
 		a.fileStateCache = make(map[string]model.FileStatus)
+		a.probeCache = make(map[string]localProbe)
 		a.moveCursor(a.cursor)
 		// After file list loaded, check for update in the background
 		if !a.updateDone {
@@ -507,12 +606,13 @@ func (a *App) handleExportConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handlePaste processes a pasted string (e.g. from file drag-and-drop).
 func (a *App) handlePaste(pasted string) (tea.Model, tea.Cmd) {
-	// Normalize: expand ~ and strip surrounding quotes
+	// Normalize: expand ~, resolve relative paths, and strip surrounding quotes.
 	path := strings.TrimSpace(pasted)
 	path = strings.Trim(path, "\"'")
-	if strings.HasPrefix(path, "~") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[1:])
+	var normalizeErr error
+	path, normalizeErr = util.NormalizeLocalPath(path)
+	if normalizeErr != nil {
+		return a, a.showToast(fmt.Sprintf(i18n.T("paste.invalid_path"), path), "warning")
 	}
 
 	// Check if it's a valid file (not a directory)
@@ -544,6 +644,12 @@ func (a *App) handlePaste(pasted string) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.syncing {
+		switch msg.String() {
+		case "a", "s", "enter", "u", "d", "x", "e", "y", "r":
+			return a, a.showToast(i18n.T("warn.sync_in_progress"), "warning")
+		}
+	}
 	switch msg.String() {
 	case "q", "esc":
 		a.quitting = true
@@ -569,6 +675,8 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, a.showToast(i18n.T("warn.configure_storage_s"), "warning")
 		}
 		a.state = viewAddFile
+		a.addFileEditMode = false
+		a.addFileEditID = ""
 		a.addFileFocus = 0
 		a.addFilePath = ""
 		a.addFileStats = nil
@@ -670,7 +778,7 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		item := a.fileList[a.cursor]
 		if dir := a.localDirMap[item.ID]; dir != "" {
-			fullPath := dir + util.FileSeparator() + item.FileName
+			fullPath := filepath.Join(dir, item.FileName)
 			_ = copyToClipboard(fullPath)
 			return a, a.showToast(fmt.Sprintf(i18n.T("toast.copied_path"), fullPath), "success")
 		}
@@ -719,7 +827,9 @@ func (a *App) handleForceUpload() (tea.Model, tea.Cmd) {
 	a.confirmTitle = i18n.T("confirm.cloud_overwrite.title")
 	a.confirmMsg = i18n.T("confirm.cloud_overwrite.msg")
 	a.confirmLabel = i18n.T("confirm.cloud_overwrite.action")
-	a.confirmAction = a.runSync(item.ID, "force_upload", false)
+	a.confirmAction = func() tea.Msg {
+		return startSyncMsg{fileID: item.ID, syncType: "force_upload"}
+	}
 	return a, nil
 }
 
@@ -730,7 +840,9 @@ func (a *App) handleForceDownload() (tea.Model, tea.Cmd) {
 	a.confirmTitle = i18n.T("confirm.local_overwrite.title")
 	a.confirmMsg = i18n.T("confirm.local_overwrite.msg")
 	a.confirmLabel = i18n.T("confirm.local_overwrite.action")
-	a.confirmAction = a.runSync(item.ID, "force_download", false)
+	a.confirmAction = func() tea.Msg {
+		return startSyncMsg{fileID: item.ID, syncType: "force_download"}
+	}
 	return a, nil
 }
 
@@ -741,9 +853,7 @@ func (a *App) handleDelete() (tea.Model, tea.Cmd) {
 	a.confirmTitle = i18n.T("confirm.delete.title")
 	a.confirmMsg = fmt.Sprintf(i18n.T("confirm.delete.msg"), item.FileName)
 	a.confirmLabel = i18n.T("confirm.delete.action")
-	a.confirmAction = func() tea.Msg {
-		return a.doDelete(item.ID)
-	}
+	a.confirmAction = func() tea.Msg { return startDeleteMsg{id: item.ID} }
 	return a, nil
 }
 
@@ -859,6 +969,8 @@ func (a *App) handleNoteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		a.addFileEditMode = false
+		a.addFileEditID = ""
 		a.state = viewFileList
 		return a, nil
 
@@ -902,16 +1014,18 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Save note
+			oldList := append([]model.FileRecord(nil), a.fileList...)
+			updatedList := append([]model.FileRecord(nil), a.fileList...)
 			noteVal := strings.TrimSpace(a.addFileInputs[1].Value())
-			a.fileList[idx].Note = noteVal
+			updatedList[idx].Note = noteVal
 
-			// Save directory
 			dirVal := strings.TrimSpace(a.addFileInputs[0].Value())
 			if dirVal != "" {
-				if strings.HasPrefix(dirVal, "~") {
-					home, _ := os.UserHomeDir()
-					dirVal = filepath.Join(home, dirVal[1:])
+				var normalizeErr error
+				dirVal, normalizeErr = util.NormalizeLocalPath(dirVal)
+				if normalizeErr != nil {
+					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("set_dir.error.not_exist"), dirVal))
+					return a, nil
 				}
 				info, err := os.Stat(dirVal)
 				if err != nil {
@@ -922,23 +1036,24 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("set_dir.error.not_dir"), dirVal))
 					return a, nil
 				}
-				a.localDirMap[a.addFileEditID] = dirVal
-				if err := a.localStore.SaveLocalDirMap(a.uid, a.localDirMap); err != nil {
-					a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
-					return a, nil
-				}
 			}
 
-			// Save file list (with updated note)
-			if err := a.webdavStore.SaveFileList(a.fileList); err != nil {
+			if err := a.webdavStore.SaveFileList(updatedList); err != nil {
 				a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
 				return a, nil
 			}
+			if err := a.setLocalDir(a.addFileEditID, dirVal); err != nil {
+				_ = a.webdavStore.SaveFileList(oldList)
+				a.addFileFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
+				return a, nil
+			}
+			a.fileList = updatedList
 
+			fileName := updatedList[idx].FileName
 			a.addFileEditMode = false
 			a.addFileEditID = ""
 			a.state = viewFileList
-			return a, a.showToast(fmt.Sprintf(i18n.T("edit_file.saved"), a.fileList[idx].FileName), "success")
+			return a, tea.Batch(a.loadFileList(), a.showToast(fmt.Sprintf(i18n.T("edit_file.saved"), fileName), "success"))
 		}
 		return a.submitAddFile(false)
 
@@ -971,11 +1086,13 @@ func (a *App) validateAddFilePath() {
 		a.addFileStats = nil
 		return
 	}
-	// Expand ~
-	if strings.HasPrefix(path, "~") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, path[1:])
+	normalized, err := util.NormalizeLocalPath(path)
+	if err != nil {
+		a.addFilePath = path
+		a.addFileStats = nil
+		return
 	}
+	path = normalized
 	info, err := os.Stat(path)
 	if err != nil {
 		a.addFilePath = path
@@ -1062,11 +1179,11 @@ func (a *App) submitAddFile(continueAdding bool) (tea.Model, tea.Cmd) {
 		a.addFileFeedback = SuccessText.Render(fmt.Sprintf(i18n.T("add_file.added_continue"), fileName))
 		a.addFileErr = false
 		a.addFileInputs[0].Focus()
-		return a, nil
+		return a, a.loadFileList()
 	}
 
 	a.state = viewFileList
-	return a, a.showToast(fmt.Sprintf(i18n.T("add_file.added"), fileName), "success")
+	return a, tea.Batch(a.loadFileList(), a.showToast(fmt.Sprintf(i18n.T("add_file.added"), fileName), "success"))
 }
 
 func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1151,12 +1268,18 @@ func (a *App) handleSetDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		dirPath := strings.TrimSpace(a.setDirInput.Value())
 		if dirPath == "" {
-			a.setDirFeedback = WarningText.Render(i18n.T("set_dir.error.empty"))
-			return a, nil
+			if err := a.setLocalDir(a.setDirTarget, ""); err != nil {
+				a.setDirFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
+				return a, nil
+			}
+			a.state = viewFileList
+			return a, tea.Batch(a.loadFileList(), a.showToast(i18n.T("set_dir.unbound"), "warning"))
 		}
-		if strings.HasPrefix(dirPath, "~") {
-			home, _ := os.UserHomeDir()
-			dirPath = filepath.Join(home, dirPath[1:])
+		var normalizeErr error
+		dirPath, normalizeErr = util.NormalizeLocalPath(dirPath)
+		if normalizeErr != nil {
+			a.setDirFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("set_dir.error.not_exist"), dirPath))
+			return a, nil
 		}
 		info, err := os.Stat(dirPath)
 		if err != nil {
@@ -1168,15 +1291,13 @@ func (a *App) handleSetDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		a.localDirMap[a.setDirTarget] = dirPath
-		if err := a.localStore.SaveLocalDirMap(a.uid, a.localDirMap); err != nil {
+		if err := a.setLocalDir(a.setDirTarget, dirPath); err != nil {
 			a.setDirFeedback = ErrorText.Render(fmt.Sprintf(i18n.T("error.save_failed"), err.Error()))
 			return a, nil
 		}
-		a.fileStateCache = make(map[string]model.FileStatus)
 
 		a.state = viewFileList
-		return a, a.showToast(fmt.Sprintf(i18n.T("set_dir.saved"), dirPath), "success")
+		return a, tea.Batch(a.loadFileList(), a.showToast(fmt.Sprintf(i18n.T("set_dir.saved"), dirPath), "success"))
 
 	case "ctrl+y":
 		val := a.setDirInput.Value()
@@ -1270,12 +1391,14 @@ func (a *App) buildExportCommand() {
 	// doesn't work in alt screen mode.
 	a.exportTempFile = ""
 	home, _ := os.UserHomeDir()
-	if home != "" {
-		cfgDir := filepath.Join(home, ".config", "small-filesync")
-		tmpPath := filepath.Join(cfgDir, "export-command.txt")
-		if err := os.WriteFile(tmpPath, []byte(a.exportCommand+"\n"), 0o644); err == nil {
+	if a.localStore != nil {
+		tmpPath := filepath.Join(a.localStore.Dir(), "export-command.txt")
+		if err := os.WriteFile(tmpPath, []byte(a.exportCommand+"\n"), 0o600); err == nil {
 			// Store as ~/... form for display
-			a.exportTempFile = strings.Replace(tmpPath, home, "~", 1)
+			a.exportTempFile = tmpPath
+			if home != "" {
+				a.exportTempFile = strings.Replace(tmpPath, home, "~", 1)
+			}
 		}
 	}
 }
@@ -1294,22 +1417,19 @@ func (a *App) runSync(fileID, syncType string, isAuto bool) tea.Cmd {
 		items = a.fileList
 	}
 
-	// Return a tea.Cmd that, when executed by bubbletea, sets up state
-	return func() tea.Msg {
-		a.syncing = true
-		a.syncItems = items
-		a.syncIndex = 0
-		a.syncType = syncType
-		a.syncIsAuto = isAuto
-		a.lastSyncResult = &model.SyncResult{
-			IsAuto:    isAuto,
-			StartedAt: time.Now(),
-		}
-		if !isAuto {
-			a.state = viewSyncResult
-		}
-		return syncStepMsg{}
+	a.syncing = true
+	a.syncItems = append([]model.FileRecord(nil), items...)
+	a.syncIndex = 0
+	a.syncType = syncType
+	a.syncIsAuto = isAuto
+	a.lastSyncResult = &model.SyncResult{
+		IsAuto:    isAuto,
+		StartedAt: time.Now(),
 	}
+	if !isAuto {
+		a.state = viewSyncResult
+	}
+	return func() tea.Msg { return syncStepMsg{} }
 }
 
 // findFileIndex returns the index of the file with the given ID, or -1.
@@ -1323,50 +1443,61 @@ func (a *App) findFileIndex(id string) int {
 }
 
 func (a *App) doSyncStep() tea.Cmd {
+	if a.syncIndex >= len(a.syncItems) {
+		return func() tea.Msg { return syncDoneMsg{} }
+	}
+	item := a.syncItems[a.syncIndex]
+	a.syncIndex++
+	worker := a.syncWorkerSnapshot()
 	return func() tea.Msg {
-		// No more items
-		if a.syncIndex >= len(a.syncItems) {
-			a.syncing = false
-			return syncDoneMsg{}
-		}
-
-		item := a.syncItems[a.syncIndex]
-		a.syncIndex++
-
-		a.lastSyncResult.Summary.Checked++
-		state := a.computeFileStateUncached(item)
-
+		state := worker.computeFileStateUncached(item)
 		var detail model.SyncDetail
-
-		if !a.hasLocalDir(item.ID) {
-			a.lastSyncResult.Summary.Unbound++
+		unbound := !worker.hasLocalDir(item.ID)
+		if unbound {
 			detail = model.SyncDetail{
 				FileName: item.FileName, Action: i18n.T("sync.action.unprocessed"), Status: i18n.T("common.failure"), Reason: state.Detail,
 			}
 		} else {
-			detail = a.doSyncItem(item)
+			detail = worker.doSyncItem(item)
 		}
-
-		// Update summary from detail (skip unbound — already counted above)
-		if detail.Action == i18n.T("sync.action.unprocessed") {
-			// already counted
-		} else if detail.Status == i18n.T("common.success") {
-			switch detail.Action {
-			case i18n.T("sync.action.upload"):
-				a.lastSyncResult.Summary.Uploaded++
-			case i18n.T("sync.action.download"):
-				a.lastSyncResult.Summary.Downloaded++
-			case i18n.T("sync.action.skip"):
-				a.lastSyncResult.Summary.Skipped++
-			}
-		} else {
-			a.lastSyncResult.Summary.Failed++
+		return syncStepDoneMsg{
+			detail:         detail,
+			unbound:        unbound,
+			fileList:       worker.fileList,
+			localStateMap:  worker.localStateMap,
+			probeCache:     worker.probeCache,
+			fileStateCache: worker.fileStateCache,
 		}
-
-		a.lastSyncResult.Details = append(a.lastSyncResult.Details, detail)
-
-		return tea.Batch(tea.Tick(0, func(t time.Time) tea.Msg { return syncStepMsg{} }))()
 	}
+}
+
+func (a *App) syncWorkerSnapshot() *App {
+	worker := &App{
+		fileList:       append([]model.FileRecord(nil), a.fileList...),
+		localDirMap:    make(map[string]string, len(a.localDirMap)),
+		localStateMap:  make(map[string]model.FileState, len(a.localStateMap)),
+		settings:       a.settings,
+		uid:            a.uid,
+		localStore:     a.localStore,
+		webdavStore:    a.webdavStore,
+		syncType:       a.syncType,
+		probeCache:     make(map[string]localProbe, len(a.probeCache)),
+		fileStateCache: make(map[string]model.FileStatus, len(a.fileStateCache)),
+		cursor:         a.cursor,
+	}
+	for id, dir := range a.localDirMap {
+		worker.localDirMap[id] = dir
+	}
+	for id, state := range a.localStateMap {
+		worker.localStateMap[id] = state
+	}
+	for path, probe := range a.probeCache {
+		worker.probeCache[path] = probe
+	}
+	for id, state := range a.fileStateCache {
+		worker.fileStateCache[id] = state
+	}
+	return worker
 }
 
 func (a *App) doSyncItem(item model.FileRecord) model.SyncDetail {
@@ -1554,7 +1685,31 @@ func (a *App) uploadFile(item model.FileRecord, localPath, localMD5 string) uplo
 	// Update local state
 	a.commitCurrentLocalState(item.ID, localPath)
 	completed = true
+	if item.LastUploadTime > 0 {
+		oldKey := item.StorageKey()
+		if oldKey != fileKey {
+			_ = a.webdavStore.RemoveFile(oldKey)
+		}
+	}
 	return uploadResult{true, ""}
+}
+
+func (a *App) deleteFile(id string) tea.Cmd {
+	worker := a.syncWorkerSnapshot()
+	return func() tea.Msg {
+		msg, ok := worker.doDelete(id).(toastMsg)
+		if !ok {
+			msg = toastMsg{text: i18n.T("delete.failed"), typ: "error"}
+		}
+		return deleteDoneMsg{
+			toast:         msg,
+			fileList:      worker.fileList,
+			localDirMap:   worker.localDirMap,
+			localStateMap: worker.localStateMap,
+			cursor:        worker.cursor,
+			applyNewState: msg.typ == "success",
+		}
+	}
 }
 
 func (a *App) doDelete(id string) tea.Msg {
@@ -1571,14 +1726,13 @@ func (a *App) doDelete(id string) tea.Msg {
 
 	item := a.fileList[targetIdx]
 
-	// Remove remote file
-	_ = a.webdavStore.RemoveFile(item.StorageKey())
-
-	// Remove from list
-	a.fileList = append(a.fileList[:targetIdx], a.fileList[targetIdx+1:]...)
-	if err := a.webdavStore.SaveFileList(a.fileList); err != nil {
+	updatedList := append([]model.FileRecord(nil), a.fileList[:targetIdx]...)
+	updatedList = append(updatedList, a.fileList[targetIdx+1:]...)
+	if err := a.webdavStore.SaveFileList(updatedList); err != nil {
 		return toastMsg{text: fmt.Sprintf(i18n.T("delete.failed"), err.Error()), typ: "error"}
 	}
+	a.fileList = updatedList
+	_ = a.webdavStore.RemoveFile(item.StorageKey())
 
 	// Clean up local mappings
 	delete(a.localDirMap, id)
@@ -1594,9 +1748,51 @@ func (a *App) doDelete(id string) tea.Msg {
 
 // Helper functions
 
+func (a *App) setLocalDir(id, dir string) error {
+	oldDir, hadOldDir := a.localDirMap[id]
+	oldState, hadOldState := a.localStateMap[id]
+	if oldDir == dir {
+		return nil
+	}
+
+	if dir == "" {
+		delete(a.localDirMap, id)
+	} else {
+		a.localDirMap[id] = dir
+	}
+	// A baseline belongs to one concrete local path. Rebinding or unbinding
+	// must discard it or the next comparison can report a false conflict.
+	delete(a.localStateMap, id)
+
+	rollback := func() {
+		if hadOldDir {
+			a.localDirMap[id] = oldDir
+		} else {
+			delete(a.localDirMap, id)
+		}
+		if hadOldState {
+			a.localStateMap[id] = oldState
+		} else {
+			delete(a.localStateMap, id)
+		}
+	}
+
+	if err := a.localStore.SaveLocalDirMap(a.uid, a.localDirMap); err != nil {
+		rollback()
+		return err
+	}
+	if err := a.localStore.SaveFileStateMap(a.uid, a.localStateMap); err != nil {
+		rollback()
+		_ = a.localStore.SaveLocalDirMap(a.uid, a.localDirMap)
+		return err
+	}
+	a.fileStateCache = make(map[string]model.FileStatus)
+	a.probeCache = make(map[string]localProbe)
+	return nil
+}
+
 func (a *App) hasLocalDir(id string) bool {
-	_, ok := a.localDirMap[id]
-	return ok
+	return a.localDirMap[id] != ""
 }
 
 func (a *App) localPath(item model.FileRecord) string {
@@ -1604,7 +1800,7 @@ func (a *App) localPath(item model.FileRecord) string {
 	if dir == "" {
 		return ""
 	}
-	return dir + util.FileSeparator() + item.FileName
+	return filepath.Join(dir, item.FileName)
 }
 
 type localProbe struct {

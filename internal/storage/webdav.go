@@ -291,8 +291,13 @@ func BuildFileDataStorageKey(id string) string {
 	return "file_" + id
 }
 
-// SaveFileDataToStorage reads a local file and uploads it as a single WebDAV object.
-// Returns the storage key ("file_<id>") on success.
+func buildVersionedFileDataStorageKey(id string) string {
+	return BuildFileDataStorageKey(id) + "_" + util.GenerateUID()
+}
+
+// SaveFileDataToStorage reads a local file and uploads it as a versioned WebDAV
+// object. A fresh key keeps the previous remote version recoverable until the
+// caller has successfully committed the new metadata.
 func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (string, error) {
 	var data []byte
 	var err error
@@ -307,7 +312,7 @@ func SaveFileDataToStorage(store *WebDAVStore, filePath string, id string) (stri
 		if len(data) > 200*1024*1024 {
 			return "", fmt.Errorf(i18n.T("webdav.file_too_large"))
 		}
-		fileKey := "file_" + id
+		fileKey := buildVersionedFileDataStorageKey(id)
 		if err := store.SaveFile(fileKey, data); err != nil {
 			if isRetryableError(err) && attempt < 2 {
 				continue
