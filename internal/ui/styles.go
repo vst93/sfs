@@ -33,6 +33,7 @@ func adaptiveColor(light, dark, light256, dark256, lightANSI, darkANSI string) l
 
 var (
 	styleMuted   = lipgloss.NewStyle().Foreground(colorMuted)
+	styleDim     = lipgloss.NewStyle().Foreground(colorDim)
 	styleSuccess = lipgloss.NewStyle().Foreground(colorSuccess)
 	styleWarning = lipgloss.NewStyle().Foreground(colorWarning)
 	styleDanger  = lipgloss.NewStyle().Foreground(colorDanger)

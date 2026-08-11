@@ -403,19 +403,29 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	}
 
 	// ── Right metadata progressively collapses on narrow terminals. ──
+	// Each group gets its own color so size / time / note read as distinct
+	// instead of blending together. rightPlain is used for width math;
+	// rightMeta holds the individually-styled rendering.
 	rightParts := []string{}
+	rightStyled := []string{}
 	if item.Size > 0 && a.width >= 58 {
-		rightParts = append(rightParts, formatKB(item.Size))
+		s := formatKB(item.Size)
+		rightParts = append(rightParts, s)
+		rightStyled = append(rightStyled, styleMuted.Render(s))
 	}
 	if item.LastUploadTime > 0 && a.width >= 76 {
-		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
+		s := time.UnixMilli(item.LastUploadTime).Format("01-02 15:04")
+		rightParts = append(rightParts, s)
+		rightStyled = append(rightStyled, styleDim.Render(s))
 	}
 	// Always try to show the note on the row; the fit-check below drops it
 	// (and the other right-side metadata) if the filename would get too cramped.
 	if item.Note != "" {
-		rightParts = append(rightParts, item.Note)
+		rightParts = append(rightParts, "› "+item.Note)
+		rightStyled = append(rightStyled, stylePrimary.Render("› "+item.Note))
 	}
 	rightPlain := strings.Join(rightParts, " · ")
+	rightMeta := strings.Join(rightStyled, " · ")
 
 	// ── Layout calc ──
 	compact := a.compact()
@@ -446,6 +456,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	}
 	if nameW < 8 {
 		rightPlain = ""
+		rightMeta = ""
 		rightW = 0
 		spacingW = 0
 		if statusW > 0 {
@@ -472,8 +483,9 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(name)
 	}
 
-	rightS := styleMuted.Render(rightPlain)
+	rightS := rightMeta
 	if selected {
+		// Selected row: strong primary highlight over the whole metadata.
 		rightS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(rightPlain)
 	}
 
