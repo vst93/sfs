@@ -416,10 +416,12 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if item.Size > 0 && a.width >= 58 {
 		rightParts = append(rightParts, formatKB(item.Size))
 	}
-	if item.LastUploadTime > 0 && a.width >= 76 {
+	if item.LastUploadTime > 0 && a.width >= 70 {
 		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
 	}
-	if item.Note != "" && a.width >= 108 {
+	// Show the note as soon as there is room — on narrow/mobile terminals too —
+	// and let the fit-check below drop it if the filename would get too cramped.
+	if item.Note != "" && (a.compact() || a.width >= 66) {
 		rightParts = append(rightParts, item.Note)
 	}
 	rightPlain := strings.Join(rightParts, "  ")
@@ -430,25 +432,25 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if !compact {
 		idxStr = fmt.Sprintf("%d", idx)
 	}
-	statusW := 12
+	statusW := 10
 	if compact {
 		statusW = 0
 	}
 	prefixW := 5 // focus marker, status icon, and spacing
 	if !compact {
-		prefixW = 9 // adds the index column
+		prefixW = 8 // adds the index column
 	}
 	rightW := lipgloss.Width(rightPlain)
 	nameW := a.width - prefixW - statusW - rightW - 5
-	if nameW > 42 {
-		nameW = 42
+	if nameW > 34 {
+		nameW = 34
 	}
-	if nameW < 4 {
+	if nameW < 8 {
 		rightPlain = ""
 		rightW = 0
 		nameW = a.width - prefixW - statusW - 5
 	}
-	if nameW < 4 && statusW > 0 {
+	if nameW < 8 && statusW > 0 {
 		statusW = 0
 		nameW = a.width - prefixW - 5
 	}
@@ -462,7 +464,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	// ── Styled ──
 	idxS := ""
 	if !compact {
-		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(2).Align(lipgloss.Right).Render(idxStr)
 	}
 
 	nameS := name
@@ -521,6 +523,9 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 	}
 	if item.LastUploadUser != "" {
 		parts = append(parts, item.LastUploadUser)
+	}
+	if item.Note != "" {
+		parts = append(parts, item.Note)
 	}
 	parts = append(parts, state.Detail)
 
