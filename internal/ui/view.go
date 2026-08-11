@@ -422,7 +422,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	// (and the other right-side metadata) if the filename would get too cramped.
 	if item.Note != "" {
 		rightParts = append(rightParts, "› "+item.Note)
-		rightStyled = append(rightStyled, styleWarning.Render("› "+item.Note))
+		rightStyled = append(rightStyled, styleMuted.Render("› "+item.Note))
 	}
 	rightPlain := strings.Join(rightParts, " · ")
 	rightMeta := strings.Join(rightStyled, " · ")
