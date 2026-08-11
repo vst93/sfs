@@ -8,6 +8,7 @@ import (
 	"os"
 	"smallFileSync/internal/model"
 	"smallFileSync/internal/storage"
+	"smallFileSync/internal/update"
 	"strconv"
 	"strings"
 )
@@ -17,6 +18,20 @@ var staticFS embed.FS
 
 func main() {
 	args := os.Args[1:]
+
+	// Internal helper used by the TUI after sudo has taken ownership of the
+	// terminal. The destination is always the currently running executable.
+	if len(args) > 0 && args[0] == "--apply-update" {
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "Usage: sfs --apply-update <staged-binary>")
+			os.Exit(2)
+		}
+		if err := update.ApplyCurrentBinary(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to apply update: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if len(args) > 0 && args[0] == "web" {
 		port := 8080
@@ -45,7 +60,6 @@ func main() {
 
 	startTerminalMode()
 }
-
 
 // maskString masks a sensitive string for display.
 func maskString(s string) string {
@@ -95,7 +109,7 @@ func handleImportConfig(b64 string) {
 
 	// Security warning
 	fmt.Println()
-	fmt.Println("⚠  Warning: This configuration contains sensitive credentials.")
+	fmt.Println("[!] Warning: This configuration contains sensitive credentials.")
 	fmt.Println("   Do not share it with untrusted parties.")
 	fmt.Println()
 

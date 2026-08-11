@@ -73,6 +73,12 @@ type App struct {
 	addFileEditMode bool
 	addFileEditID   string
 
+	// Path completion state (add/edit path field)
+	completeDir        string
+	completePrefix     string
+	completeCandidates []string
+	completeIndex      int
+
 	// Settings state
 	settingsInputs   []textinput.Model
 	settingsFocus    int
@@ -116,6 +122,8 @@ type App struct {
 	// Update check
 	updateResult             *update.CheckResult
 	updateDone               bool // whether the async check has completed
+	updating                 bool
+	stagedUpdate             *update.PreparedUpdate
 	updateProgressDownloaded atomic.Int64
 	updateProgressTotal      atomic.Int64
 
@@ -383,13 +391,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				s := a.lastSyncResult.Summary
 				parts := []string{}
 				if s.Uploaded > 0 {
-					parts = append(parts, fmt.Sprintf("↑%d", s.Uploaded))
+					parts = append(parts, fmt.Sprintf("UP:%d", s.Uploaded))
 				}
 				if s.Downloaded > 0 {
-					parts = append(parts, fmt.Sprintf("↓%d", s.Downloaded))
+					parts = append(parts, fmt.Sprintf("DN:%d", s.Downloaded))
 				}
 				if s.Failed > 0 {
-					parts = append(parts, fmt.Sprintf("✕%d", s.Failed))
+					parts = append(parts, fmt.Sprintf("ERR:%d", s.Failed))
 				}
 				if len(parts) > 0 {
 					toast = i18n.T("auto_sync.done") + "  " + strings.Join(parts, "  ")
@@ -505,18 +513,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.result.HasUpdate {
 			if msg.result.IsBrew {
-				return a, a.showToast(fmt.Sprintf(i18n.T("update.brew_hint")+" (%s → %s)", model.AppVersion, msg.result.LatestVersion), "warning")
+				return a, a.showToast(fmt.Sprintf(i18n.T("update.brew_hint"), model.AppVersion, msg.result.LatestVersion), "warning")
 			}
 			return a, a.showToast(fmt.Sprintf(i18n.T("update.available"), msg.result.LatestVersion, model.AppVersion), "warning")
 		}
 		return a, nil
 
 	case doUpdateMsg:
+		a.updating = true
 		a.updateProgressDownloaded.Store(0)
 		a.updateProgressTotal.Store(0)
 		return a, tea.Batch(a.showToast(i18n.T("update.downloading"), "success"), a.doUpdate(), a.startUpdateProgressTicker())
 
 	case updateProgressMsg:
+		if !a.updating {
+			return a, nil
+		}
 		downloaded := a.updateProgressDownloaded.Load()
 		total := a.updateProgressTotal.Load()
 		if total > 0 {
@@ -528,7 +540,59 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.startUpdateProgressTicker()
 
+	case updatePreparedMsg:
+		if msg.err != nil {
+			a.updating = false
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), msg.err.Error()), "error")
+		}
+		target, err := update.CurrentExecutable()
+		if err != nil {
+			msg.prepared.Cleanup()
+			a.updating = false
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), err.Error()), "error")
+		}
+		needsElevation, err := update.NeedsElevation(target)
+		if err != nil {
+			msg.prepared.Cleanup()
+			a.updating = false
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), err.Error()), "error")
+		}
+		if !needsElevation {
+			return a, a.applyPreparedUpdate(msg.prepared)
+		}
+		if runtime.GOOS == "windows" {
+			msg.prepared.Cleanup()
+			a.updating = false
+			return a, a.showToast(i18n.T("update.elevation_unsupported"), "error")
+		}
+		if _, err := exec.LookPath("sudo"); err != nil {
+			msg.prepared.Cleanup()
+			a.updating = false
+			return a, a.showToast(i18n.T("update.sudo_missing"), "error")
+		}
+		a.stagedUpdate = &msg.prepared
+		cmd := exec.Command("sudo", target, "--apply-update", msg.prepared.BinaryPath)
+		return a, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return updateCompleteMsg{err: err}
+		})
+
+	case doBrewUpdateMsg:
+		brew, err := update.BrewExecutable()
+		if err != nil {
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), err.Error()), "error")
+		}
+		a.updating = true
+		cmd := exec.Command(brew, "upgrade", update.BrewFormula)
+		return a, tea.ExecProcess(cmd, func(err error) tea.Msg {
+			return updateCompleteMsg{err: err}
+		})
+
 	case updateCompleteMsg:
+		a.updating = false
+		if a.stagedUpdate != nil {
+			a.stagedUpdate.Cleanup()
+			a.stagedUpdate = nil
+		}
 		if msg.err != nil {
 			return a, a.showToast(fmt.Sprintf(i18n.T("update.failed"), msg.err.Error()), "error")
 		}
@@ -638,6 +702,7 @@ func (a *App) handlePaste(pasted string) (tea.Model, tea.Cmd) {
 	a.addFilePath = path
 	a.addFileStats = info
 	a.addFileFeedback = ""
+	a.resetPathCompletion()
 	a.addFileInputs[0].SetValue(path)
 	a.addFileInputs[1].SetValue("")
 	return a, nil
@@ -681,8 +746,10 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.addFilePath = ""
 		a.addFileStats = nil
 		a.addFileFeedback = ""
-		a.addFileInputs[0].SetValue("")
+		a.resetPathCompletion()
+		a.addFileInputs[0].SetValue(currentPathPrefix())
 		a.addFileInputs[1].SetValue("")
+		a.addFileInputs[0].CursorEnd()
 		a.addFileInputs[0].Focus()
 		return a, nil
 
@@ -874,9 +941,9 @@ func (a *App) handleEditFile() (tea.Model, tea.Cmd) {
 	if dir := a.localDirMap[item.ID]; dir != "" {
 		a.addFileInputs[0].SetValue(dir)
 	} else {
-		cwd, _ := os.Getwd()
-		a.addFileInputs[0].SetValue(cwd)
+		a.addFileInputs[0].SetValue(currentPathPrefix())
 	}
+	a.resetPathCompletion()
 	a.addFileInputs[0].CursorEnd()
 	a.addFileInputs[1].SetValue(item.Note)
 	a.addFileInputs[1].CursorEnd()
@@ -972,10 +1039,19 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.addFileEditMode = false
 		a.addFileEditID = ""
 		a.state = viewFileList
+		a.resetPathCompletion()
 		return a, nil
 
-	case "tab", "down":
+	case "tab":
+		// Tab completes the path field and stays inert in the note field.
+		if a.addFileFocus == 0 {
+			a.completePathInput()
+		}
+		return a, nil
+
+	case "down":
 		a.addFileFocus = (a.addFileFocus + 1) % len(a.addFileInputs)
+		a.resetPathCompletion()
 		for i := range a.addFileInputs {
 			if i == a.addFileFocus {
 				a.addFileInputs[i].Focus()
@@ -987,6 +1063,7 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "up":
 		a.addFileFocus = (a.addFileFocus - 1 + len(a.addFileInputs)) % len(a.addFileInputs)
+		a.resetPathCompletion()
 		for i := range a.addFileInputs {
 			if i == a.addFileFocus {
 				a.addFileInputs[i].Focus()
@@ -1069,6 +1146,9 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	default:
+		if a.addFileFocus == 0 {
+			a.resetPathCompletion()
+		}
 		var cmd tea.Cmd
 		a.addFileInputs[a.addFileFocus], cmd = a.addFileInputs[a.addFileFocus].Update(msg)
 		// Validate path on every keystroke for input[0]
@@ -1077,6 +1157,129 @@ func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 	}
+}
+
+func (a *App) resetPathCompletion() {
+	a.completeDir = ""
+	a.completePrefix = ""
+	a.completeCandidates = nil
+	a.completeIndex = 0
+}
+
+// currentPathPrefix returns the current working directory with a trailing
+// separator, ready for the user to append a file name.
+func currentPathPrefix() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd + string(filepath.Separator)
+}
+
+// completePathInput expands and auto-completes the path field. The first Tab
+// completes to the longest shared prefix, and further Tabs cycle through the
+// matching entries in order.
+func (a *App) completePathInput() {
+	raw := strings.TrimSpace(a.addFileInputs[0].Value())
+	value := raw
+	if value == "" {
+		value = "."
+	}
+	expanded := util.ExpandUserPath(value)
+	dirPart, base := expanded, ""
+	if !strings.HasSuffix(expanded, string(filepath.Separator)) && expanded != "." && expanded != ".." {
+		dirPart, base = filepath.Split(expanded)
+	}
+	if dirPart == "" {
+		dirPart = "."
+	}
+	joinedDir := filepath.Join(dirPart)
+	absDir, err := filepath.Abs(dirPart)
+	if err != nil {
+		a.resetPathCompletion()
+		return
+	}
+
+	// Repeated Tab in the same directory continues the active completion list.
+	if len(a.completeCandidates) > 0 && a.completeDir == joinedDir {
+		if raw == a.completePrefix || raw == a.completePrefix+string(filepath.Separator) {
+			a.showPathCandidate(joinedDir)
+			return
+		}
+	}
+
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		a.resetPathCompletion()
+		return
+	}
+	var candidates []string
+	for _, e := range entries {
+		if base == "" || strings.HasPrefix(e.Name(), base) {
+			candidates = append(candidates, e.Name())
+		}
+	}
+	if len(candidates) == 0 {
+		a.resetPathCompletion()
+		return
+	}
+
+	a.completeDir = joinedDir
+	a.completeCandidates = candidates
+	if base == "" || len(candidates) == 1 {
+		a.completeIndex = 0
+		a.showPathCandidate(joinedDir)
+		return
+	}
+
+	prefix := commonPrefix(candidates)
+	if len(prefix) > len(base) {
+		// Complete up to the shared prefix first; the next Tab picks an entry.
+		a.completeIndex = -1
+		a.completePrefix = filepath.Join(joinedDir, prefix)
+		a.addFileInputs[0].SetValue(a.completePrefix)
+		a.addFileInputs[0].CursorEnd()
+		a.validateAddFilePath()
+		return
+	}
+
+	a.completeIndex = 0
+	a.showPathCandidate(joinedDir)
+}
+
+func (a *App) showPathCandidate(joinedDir string) {
+	candidates := a.completeCandidates
+	if len(candidates) == 0 {
+		a.resetPathCompletion()
+		return
+	}
+	if a.completeIndex < 0 {
+		a.completeIndex = 0
+	} else {
+		a.completeIndex = (a.completeIndex + 1) % len(candidates)
+	}
+	completed := filepath.Join(joinedDir, candidates[a.completeIndex])
+	if info, err := os.Stat(completed); err == nil && info.IsDir() && !strings.HasSuffix(completed, string(filepath.Separator)) {
+		completed += string(filepath.Separator)
+	}
+	a.completePrefix = completed
+	a.addFileInputs[0].SetValue(completed)
+	a.addFileInputs[0].CursorEnd()
+	a.validateAddFilePath()
+}
+
+// commonPrefix returns the longest byte-wise prefix shared by all names.
+func commonPrefix(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	prefix := names[0]
+	for _, name := range names[1:] {
+		for !strings.HasPrefix(name, prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+	}
+	return prefix
 }
 
 func (a *App) validateAddFilePath() {
@@ -1172,12 +1375,14 @@ func (a *App) submitAddFile(continueAdding bool) (tea.Model, tea.Cmd) {
 	}
 
 	if continueAdding {
-		a.addFileInputs[0].SetValue("")
+		a.resetPathCompletion()
+		a.addFileInputs[0].SetValue(currentPathPrefix())
 		a.addFileInputs[1].SetValue("")
 		a.addFilePath = ""
 		a.addFileStats = nil
 		a.addFileFeedback = SuccessText.Render(fmt.Sprintf(i18n.T("add_file.added_continue"), fileName))
 		a.addFileErr = false
+		a.addFileInputs[0].CursorEnd()
 		a.addFileInputs[0].Focus()
 		return a, a.loadFileList()
 	}
@@ -2053,7 +2258,14 @@ func (a *App) moveCursor(target int) {
 
 type doUpdateMsg struct{}
 
+type doBrewUpdateMsg struct{}
+
 type updateProgressMsg struct{}
+
+type updatePreparedMsg struct {
+	prepared update.PreparedUpdate
+	err      error
+}
 
 type updateCompleteMsg struct {
 	err error
@@ -2068,9 +2280,6 @@ func (a *App) handleUpdate() (tea.Model, tea.Cmd) {
 	if a.updateResult.Error != nil {
 		return a, a.showToast(i18n.T("update.check_failed"), "error")
 	}
-	if a.updateResult.IsBrew {
-		return a, a.showToast(i18n.T("update.brew_hint"), "warning")
-	}
 	if !a.updateResult.HasUpdate {
 		return a, a.showToast(fmt.Sprintf(i18n.T("update.current_latest"), model.AppVersion), "success")
 	}
@@ -2078,24 +2287,40 @@ func (a *App) handleUpdate() (tea.Model, tea.Cmd) {
 	// Show confirm dialog for the update
 	a.state = viewConfirm
 	a.confirmFocus = 0 // default to "confirm"
-	a.confirmTitle = fmt.Sprintf(i18n.T("update.available"), a.updateResult.LatestVersion, model.AppVersion)
-	a.confirmMsg = ""
-	a.confirmLabel = i18n.T("update.action")
-	a.confirmAction = func() tea.Msg {
-		return doUpdateMsg{}
+	a.confirmTitle = fmt.Sprintf(i18n.T("update.confirm_title"), a.updateResult.LatestVersion, model.AppVersion)
+	if a.updateResult.IsBrew {
+		a.confirmMsg = i18n.T("update.brew_confirm")
+		a.confirmLabel = i18n.T("update.brew_action")
+		a.confirmAction = func() tea.Msg { return doBrewUpdateMsg{} }
+		return a, nil
 	}
+	a.confirmMsg = ""
+	if target, err := update.CurrentExecutable(); err == nil {
+		if elevated, checkErr := update.NeedsElevation(target); checkErr == nil && elevated {
+			a.confirmMsg = i18n.T("update.elevation_hint")
+		}
+	}
+	a.confirmLabel = i18n.T("update.action")
+	a.confirmAction = func() tea.Msg { return doUpdateMsg{} }
 	return a, nil
 }
 
-// doUpdate downloads and applies the update, then quits.
+// doUpdate downloads and extracts the update before choosing the write path.
 func (a *App) doUpdate() tea.Cmd {
 	return func() tea.Msg {
 		progressFn := func(downloaded, total int64) {
 			a.updateProgressDownloaded.Store(downloaded)
 			a.updateProgressTotal.Store(total)
 		}
-		err := update.DownloadAndUpdate(a.updateResult.DownloadURL, progressFn)
-		return updateCompleteMsg{err: err}
+		prepared, err := update.PrepareUpdate(a.updateResult.DownloadURL, progressFn)
+		return updatePreparedMsg{prepared: prepared, err: err}
+	}
+}
+
+func (a *App) applyPreparedUpdate(prepared update.PreparedUpdate) tea.Cmd {
+	return func() tea.Msg {
+		defer prepared.Cleanup()
+		return updateCompleteMsg{err: update.ApplyCurrentBinary(prepared.BinaryPath)}
 	}
 }
 

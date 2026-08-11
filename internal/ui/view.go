@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -57,27 +58,70 @@ func (a *App) View() string {
 	return bodyStr + "\n" + a.renderBottomBar()
 }
 
+// ── Shared layout helpers ───────────────────────────────────────────────────
+
+// compact reports whether the terminal is narrow enough to require the
+// mobile/portrait layout (e.g. Termux).
+func (a *App) compact() bool {
+	return a.width < 62
+}
+
+func (a *App) contentWidth() int {
+	return max(2, a.width-4)
+}
+
+func (a *App) viewHeader(title string) string {
+	title = truncateText(strings.TrimSpace(title), max(1, a.contentWidth()-2))
+	left := "  " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(title)
+	if a.compact() {
+		return left + "\n" + separator(a.contentWidth()) + "\n"
+	}
+	tag := styleMuted.Render("SFS  v" + model.AppVersion)
+	gap := max(2, a.width-lipgloss.Width(left)-lipgloss.Width(tag)-2)
+	return left + strings.Repeat(" ", gap) + tag + "\n" + separator(a.contentWidth()) + "\n"
+}
+
+func (a *App) viewFooter(hint string) string {
+	var b strings.Builder
+	b.WriteString("\n" + separator(a.contentWidth()) + "\n")
+	for _, line := range wrapText(hint, max(1, a.contentWidth()-2)) {
+		b.WriteString("  " + line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (a *App) inputWidth(labelW int) int {
+	return max(8, min(64, a.width-8-labelW-2))
+}
+
+func (a *App) fieldLine(label string, input textinput.Model, focused bool, labelW int) string {
+	labelS := lipgloss.NewStyle().Foreground(colorMuted).Width(labelW).Render(label)
+	if focused {
+		return "  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("> ") + labelS + ": " + input.View()
+	}
+	return "    " + labelS + ": " + input.View()
+}
+
 // ── Toast ───────────────────────────────────────────────────────────────────
 
 func (a *App) renderToast(b *strings.Builder) {
 	var icon, label string
-	var clr lipgloss.Color
+	var clr lipgloss.TerminalColor
 	switch a.toastType {
 	case "warning":
-		icon, label, clr = "⚠", i18n.T("common.warning"), colorWarning
+		icon, label, clr = "!", i18n.T("common.warning"), colorWarning
 	case "error":
-		icon, label, clr = "✗", i18n.T("common.error"), colorDanger
+		icon, label, clr = "x", i18n.T("common.error"), colorDanger
 	default:
-		icon, label, clr = "✓", i18n.T("common.success"), colorSuccess
+		icon, label, clr = "+", i18n.T("common.success"), colorSuccess
 	}
 	tag := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("#ffffff")).
-		Background(clr).
-		Padding(0, 1).
-		Render(" " + icon + " " + label + " ")
-	msg := lipgloss.NewStyle().Foreground(clr).Render(a.toast)
-	b.WriteString("  " + tag + " " + msg)
+		Foreground(clr).
+		Render("[" + icon + "] " + label + ":")
+	msgW := max(1, a.width-lipgloss.Width(tag)-3)
+	msg := lipgloss.NewStyle().Foreground(clr).Render(truncateText(a.toast, msgW))
+	b.WriteString(" " + tag + " " + msg)
 }
 
 // ── Bottom bar ──────────────────────────────────────────────────────────────
@@ -100,33 +144,89 @@ func (a *App) renderBottomBar() string {
 
 	// Show update badge if new version available
 	if a.updateDone && a.updateResult != nil && a.updateResult.HasUpdate {
-		right = styleWarning.Render(fmt.Sprintf("↑ %s", a.updateResult.LatestVersion)) + "  " + right
+		right = styleWarning.Render(fmt.Sprintf("UP %s", a.updateResult.LatestVersion)) + "  " + right
 	}
 
-	parts := []string{
-		i18n.T("bottom.navigate"),
-		i18n.T("bottom.dir"),
-		i18n.T("bottom.add"),
-		i18n.T("bottom.settings"),
-		i18n.T("bottom.update"),
-		i18n.T("bottom.sync_all"),
-		i18n.T("bottom.auto"),
-		i18n.T("bottom.refresh"),
-		i18n.T("bottom.help"),
-		i18n.T("bottom.quit"),
+	if a.state != viewFileList {
+		left := renderShortcutSet(a.contextShortcuts())
+		if lipgloss.Width(left) > max(0, a.width) {
+			left = renderShortcutSet([]string{a.contextFallbackShortcut()})
+		}
+		return lipgloss.NewStyle().Foreground(colorBarText).Width(max(0, a.width)).Render(left)
 	}
-	left := " " + strings.Join(parts, " · ") + " "
+
+	tiers := [][]string{
+		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.upload"), i18n.T("bottom.download"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.sync_all"), i18n.T("bottom.update"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.sync_all"), i18n.T("bottom.update"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.action"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+	}
+	left := renderShortcutSet(tiers[len(tiers)-1])
+	for _, tier := range tiers {
+		candidate := renderShortcutSet(tier)
+		if lipgloss.Width(candidate) <= max(0, a.width-1) {
+			left = candidate
+			break
+		}
+	}
 
 	rightStr := right
 
-	gap := a.width - lipgloss.Width(left) - lipgloss.Width(rightStr)
-	if gap < 1 {
-		gap = 1
+	gap := a.width - lipgloss.Width(left) - lipgloss.Width(rightStr) - 1
+	if gap < 2 {
+		rightStr = ""
+		gap = max(0, a.width-lipgloss.Width(left))
 	}
 
 	barText := left + strings.Repeat(" ", gap) + rightStr
 
-	return lipgloss.NewStyle().Foreground(colorBarText).Render(barText)
+	return lipgloss.NewStyle().Foreground(colorBarText).Width(max(0, a.width)).Render(barText)
+}
+
+func (a *App) contextShortcuts() []string {
+	switch a.state {
+	case viewAddFile:
+		return []string{"Tab " + i18n.T("common.next"), "Enter " + i18n.T("common.confirm"), "Esc " + i18n.T("common.back")}
+	case viewSettings:
+		return []string{"Tab " + i18n.T("common.next"), "Enter " + i18n.T("common.save"), "Esc " + i18n.T("common.back")}
+	case viewSetDir:
+		return []string{"Enter " + i18n.T("common.confirm"), "Esc " + i18n.T("common.back")}
+	case viewConfirm:
+		return []string{"Tab " + i18n.T("common.select"), "Enter " + i18n.T("common.confirm"), "Esc " + i18n.T("common.cancel")}
+	case viewExportConfig:
+		return []string{"Esc " + i18n.T("common.close")}
+	default:
+		return []string{"Esc " + i18n.T("common.back")}
+	}
+}
+
+func (a *App) contextFallbackShortcut() string {
+	switch a.state {
+	case viewConfirm:
+		return "Esc " + i18n.T("common.cancel")
+	case viewExportConfig:
+		return "Esc " + i18n.T("common.close")
+	default:
+		return "Esc " + i18n.T("common.back")
+	}
+}
+
+func renderShortcutSet(parts []string) string {
+	styled := make([]string, 0, len(parts))
+	for _, part := range parts {
+		styled = append(styled, renderShortcut(part))
+	}
+	return " " + strings.Join(styled, " ") + " "
+}
+
+func renderShortcut(shortcut string) string {
+	parts := strings.SplitN(shortcut, " ", 2)
+	if len(parts) != 2 {
+		return shortcut
+	}
+	key := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(parts[0])
+	label := lipgloss.NewStyle().Foreground(colorBarText).Render(parts[1])
+	return key + " " + label
 }
 
 // renderAutoSyncCountdown returns a colored countdown display.
@@ -138,17 +238,20 @@ func (a *App) renderAutoSyncCountdown() string {
 	if a.autoCountdown <= 2 {
 		countdown = lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render(fmt.Sprintf("%ds", a.autoCountdown))
 	}
-	return fmt.Sprintf("⟳ auto %s", countdown)
+	return fmt.Sprintf("AUTO %s", countdown)
 }
 
 // ── File list ───────────────────────────────────────────────────────────────
 
 func (a *App) computeVisibleRows() int {
-	used := 4
+	used := 5 // header, selected-row detail, and bottom bar
 	if a.toast != "" {
 		used++
 	}
 	n := a.height - used
+	if len(a.fileList) > n {
+		n -= 2 // page indicator and breathing room
+	}
 	if n < 2 {
 		n = 2
 	}
@@ -170,19 +273,33 @@ func (a *App) renderFileList() string {
 
 	var b strings.Builder
 
-	// ── Top header ──
+	// ── Top header and status rail ──
 	_, matched, pending, unbound := a.countStats()
-	b.WriteString(" " + model.AppFullName + styleMuted.Render("  v"+model.AppVersion))
-	b.WriteString("\n\n")
+	title := " " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("SFS")
+	if !a.compact() {
+		title += styleMuted.Render("  SMALL FILE SYNC")
+	}
+	title += styleMuted.Render("  v" + model.AppVersion)
+	connection := styleDanger.Render(i18n.T("bottom.storage_unconfigured"))
+	if a.isStorageConfigured() {
+		connection = styleSuccess.Render("WebDAV")
+	}
+	if lipgloss.Width(title)+lipgloss.Width(connection)+3 <= a.width {
+		gap := max(1, a.width-lipgloss.Width(title)-lipgloss.Width(connection)-2)
+		b.WriteString(title + strings.Repeat(" ", gap) + connection)
+	} else {
+		b.WriteString(title)
+	}
+	b.WriteString("\n" + separator(max(2, a.width-2)) + "\n")
 
-	// ── Info bar: stats (left) · auto-sync (right) ──
+	// ── Status rail: stats (left) · auto-sync (right) ──
 	chipStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	chipStyleSuccess := lipgloss.NewStyle().Foreground(colorSuccess)
-	chipStyleWarning := lipgloss.NewStyle().Foreground(colorWarning)
+	chipStyleSuccess := lipgloss.NewStyle().Bold(true).Foreground(colorSuccess)
+	chipStyleWarning := lipgloss.NewStyle().Bold(true).Foreground(colorWarning)
 
 	// Left: file stats
 	leftParts := []string{}
-	leftParts = append(leftParts, fmt.Sprintf(i18n.T("file_list.files_count"), total))
+	leftParts = append(leftParts, lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(fmt.Sprintf(i18n.T("file_list.files_count"), total)))
 	leftParts = append(leftParts, chipStyleSuccess.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.matched_short"), matched)))
 	leftParts = append(leftParts, chipStyleWarning.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.pending_short"), pending)))
 	if unbound > 0 {
@@ -203,20 +320,28 @@ func (a *App) renderFileList() string {
 		} else {
 			countdownStr = stylePrimary.Render(countdownStr)
 		}
-		right = chipStyle.Render("⟳ ") + autoLabel + "  " + countdownStr
+		right = chipStyle.Render("AUTO ") + autoLabel + "  " + countdownStr
 		if !a.lastSyncTime.IsZero() {
 			right += chipStyle.Render(fmt.Sprintf("  ·  %s %s", i18n.T("file_list.last_sync"), a.lastSyncTime.Format("15:04:05")))
 		}
 	}
 
-	// Compose info bar with left/right alignment (right side has 2-char padding)
+	// Hide the clock before allowing it to collide with the status summary.
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)
-	gap := a.width - leftW - rightW - 4 // 4 = 2 indent left + 2 padding right
+	if leftW+rightW+5 > a.width {
+		right = ""
+		rightW = 0
+	}
+	if leftW > max(2, a.width-3) {
+		left = truncateText(left, max(2, a.width-3))
+		leftW = lipgloss.Width(left)
+	}
+	gap := a.width - leftW - rightW - 3
 	if gap < 1 {
 		gap = 1
 	}
-	b.WriteString("  " + left + strings.Repeat(" ", gap) + right + "  ")
+	b.WriteString(" " + left + strings.Repeat(" ", gap) + right + " ")
 	b.WriteString("\n")
 
 	// ── List rows ──
@@ -265,7 +390,7 @@ func (a *App) clampPage() {
 func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, selected bool) string {
 	// ── Status ──
 	var stText string
-	var stColor lipgloss.Color
+	var stColor lipgloss.TerminalColor
 	var stIcon string
 	switch state.Key {
 	case "matched":
@@ -286,48 +411,59 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		stText, stColor, stIcon = "", colorMuted, " "
 	}
 
-	// ── Right part ──
+	// ── Right metadata progressively collapses on narrow terminals. ──
 	rightParts := []string{}
-	if item.Size > 0 {
+	if item.Size > 0 && a.width >= 58 {
 		rightParts = append(rightParts, formatKB(item.Size))
 	}
-	if item.LastUploadTime > 0 {
+	if item.LastUploadTime > 0 && a.width >= 76 {
 		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
 	}
-	if item.Note != "" {
+	if item.Note != "" && a.width >= 108 {
 		rightParts = append(rightParts, item.Note)
 	}
 	rightPlain := strings.Join(rightParts, "  ")
 
 	// ── Layout calc ──
-	cursorPlain := "   "
-	if selected {
-		cursorPlain = " ▸ "
+	compact := a.compact()
+	idxStr := ""
+	if !compact {
+		idxStr = fmt.Sprintf("%d", idx)
 	}
-	idxStr := fmt.Sprintf("%d", idx)
-	prefixW := lipgloss.Width(cursorPlain) + 1 + lipgloss.Width(idxStr) + 1
+	statusW := 12
+	if compact {
+		statusW = 0
+	}
+	prefixW := 5 // focus marker, status icon, and spacing
+	if !compact {
+		prefixW = 9 // adds the index column
+	}
 	rightW := lipgloss.Width(rightPlain)
-	nameW := a.width - prefixW - rightW - 6
-	if nameW > 35 {
-		nameW = 35
+	nameW := a.width - prefixW - statusW - rightW - 5
+	if nameW > 42 {
+		nameW = 42
 	}
 	if nameW < 4 {
-		nameW = 4
+		rightPlain = ""
+		rightW = 0
+		nameW = a.width - prefixW - statusW - 5
 	}
-	name := item.FileName
-	if lipgloss.Width(name) > nameW {
-		runes := []rune(name)
-		if len(runes) > nameW-1 {
-			name = string(runes[:nameW-1]) + "..."
-		}
+	if nameW < 4 && statusW > 0 {
+		statusW = 0
+		nameW = a.width - prefixW - 5
 	}
+	nameW = max(4, nameW)
+	name := truncateText(item.FileName, nameW)
 	pad := nameW - lipgloss.Width(name)
 	if pad < 0 {
 		pad = 0
 	}
 
 	// ── Styled ──
-	idxS := lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+	idxS := ""
+	if !compact {
+		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+	}
 
 	nameS := name
 	if selected {
@@ -337,21 +473,37 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	// Selected row: brighter right-side info; unselected: muted
 	var rightS string
 	if selected {
-		rightS = lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db")).Render(rightPlain)
+		rightS = lipgloss.NewStyle().Foreground(colorBarText).Render(rightPlain)
 	} else {
 		rightS = styleMuted.Render(rightPlain)
 	}
 
-	cursorS := "   "
+	cursorS := "  "
 	if selected {
-		cursorS = lipgloss.NewStyle().Foreground(colorPrimary).Render(" ▸ ")
+		cursorS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("> ")
 	}
 
-	return cursorS + idxS + " " +
-		lipgloss.NewStyle().Foreground(stColor).Render(stIcon) + " " +
+	statusText := ""
+	if statusW > 0 {
+		statusText = stText
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(statusW)
+	if selected {
+		statusStyle = statusStyle.Bold(true)
+	}
+	line := cursorS
+	if !compact {
+		line += idxS + " "
+	}
+	iconStyle := lipgloss.NewStyle().Foreground(stColor)
+	if selected {
+		iconStyle = iconStyle.Bold(true)
+	}
+	line += iconStyle.Render(stIcon) + " " +
 		nameS + strings.Repeat(" ", pad) + "  " +
-		lipgloss.NewStyle().Foreground(stColor).Width(12).Render(stText) +
+		statusStyle.Render(statusText) +
 		rightS
+	return line
 }
 
 func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
@@ -372,13 +524,35 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 	}
 	parts = append(parts, state.Detail)
 
-	line := "       " + strings.Join(parts, " · ")
-	if len(line) > a.width {
-		line = line[:a.width-1] + "…"
+	indent := "       "
+	if a.compact() {
+		indent = "     "
 	}
+	line := truncateText(indent+strings.Join(parts, " · "), max(1, a.width-1))
 	// Pass selected flag from call site — we always show detail only for the selected row,
 	// so use a distinct soft-blue so it doesn't clash with the white-highlighted filename.
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#8baccc")).Render(line)
+	return lipgloss.NewStyle().Foreground(colorMuted).Render(line)
+}
+
+func truncateText(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 3 {
+		return strings.Repeat(".", width)
+	}
+	var b strings.Builder
+	for _, r := range s {
+		candidate := b.String() + string(r)
+		if lipgloss.Width(candidate)+3 > width {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String() + "..."
 }
 
 func (a *App) countStats() (total, matched, pending, unbound int) {
@@ -402,9 +576,13 @@ func (a *App) countStats() (total, matched, pending, unbound int) {
 
 func (a *App) renderEmpty() string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(" " + model.AppFullName))
-	b.WriteString(styleMuted.Render("  v" + model.AppVersion))
-	b.WriteString("\n\n\n")
+	title := " " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("SFS")
+	if a.compact() {
+		title += styleMuted.Render("  v" + model.AppVersion)
+	} else {
+		title += styleMuted.Render("  SMALL FILE SYNC  /  v" + model.AppVersion)
+	}
+	b.WriteString(title + "\n" + separator(max(2, a.width-2)) + "\n\n")
 	if !a.isStorageConfigured() {
 		b.WriteString(i18n.T("empty.no_storage") + "\n\n")
 		b.WriteString(i18n.T("empty.press"))
@@ -426,98 +604,61 @@ func (a *App) renderEmpty() string {
 func (a *App) renderAddFile() string {
 	var b strings.Builder
 
+	labelW := 6
+	inputW := a.inputWidth(labelW)
+	a.addFileInputs[0].Width = inputW
+	a.addFileInputs[1].Width = inputW
+
 	if a.addFileEditMode {
 		// ── Edit mode: directory + note, no path validation ──
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("edit_file.title")))
+		b.WriteString(a.viewHeader(i18n.T("edit_file.title")))
 		b.WriteString("\n")
-		b.WriteString(separator(a.width - 4))
+		b.WriteString(a.fieldLine(i18n.T("add_file.label.path"), a.addFileInputs[0], a.addFileFocus == 0, labelW))
 		b.WriteString("\n\n")
-
-		labelStyle := lipgloss.NewStyle().Foreground(colorMuted).Width(6)
-
-		// Directory field
-		if a.addFileFocus == 0 {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
-		} else {
-			b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
-		}
-		b.WriteString(a.addFileInputs[0].View())
-		b.WriteString("\n")
-
-		// Note field
-		if a.addFileFocus == 1 {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
-		} else {
-			b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
-		}
-		b.WriteString(a.addFileInputs[1].View())
+		b.WriteString(a.fieldLine(i18n.T("add_file.label.note"), a.addFileInputs[1], a.addFileFocus == 1, labelW))
 		if a.addFileFeedback != "" {
 			b.WriteString("\n\n  " + a.addFileFeedback)
 		}
-		b.WriteString("\n\n")
-		b.WriteString(separator(a.width - 4))
-		b.WriteString("\n")
-		b.WriteString(styleMuted.Render(i18n.T("edit_file.hint")))
+		b.WriteString(a.viewFooter(i18n.T("edit_file.hint")))
 		return b.String()
 	}
 
 	// ── Add mode: path + note with validation ──
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("add_file.title")))
+	b.WriteString(a.viewHeader(i18n.T("add_file.title")))
 	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n\n")
-
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted).Width(6)
-
-	// Path field
-	if a.addFileFocus == 0 {
-		b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
-	} else {
-		b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.path")) + ": ")
-	}
-	b.WriteString(a.addFileInputs[0].View())
+	b.WriteString(a.fieldLine(i18n.T("add_file.label.path"), a.addFileInputs[0], a.addFileFocus == 0, labelW))
 	b.WriteString("\n")
 	if a.addFileStats != nil {
-		b.WriteString("        " + styleSuccess.Render(fmt.Sprintf(i18n.T("add_file.path_valid"), a.addFileStats.Name(), formatBytes(a.addFileStats.Size()))))
+		validMsg := fmt.Sprintf(i18n.T("add_file.path_valid"), a.addFileStats.Name(), formatBytes(a.addFileStats.Size()))
+		b.WriteString("        " + styleSuccess.Render(truncateText(validMsg, max(1, a.width-10))))
+		b.WriteString("\n\n")
 	} else if a.addFilePath != "" {
 		b.WriteString("        " + styleDanger.Render(i18n.T("add_file.path_invalid")))
-	}
-	b.WriteString("\n\n")
-
-	// Note field
-	if a.addFileFocus == 1 {
-		b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
+		b.WriteString("\n\n")
 	} else {
-		b.WriteString("    " + labelStyle.Render(i18n.T("add_file.label.note")) + ": ")
+		b.WriteString("\n")
 	}
-	b.WriteString(a.addFileInputs[1].View())
+	b.WriteString(a.fieldLine(i18n.T("add_file.label.note"), a.addFileInputs[1], a.addFileFocus == 1, labelW))
 	if a.addFileFeedback != "" {
 		b.WriteString("\n\n  " + a.addFileFeedback)
 	}
-	b.WriteString("\n\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render(i18n.T("add_file.hint")))
+	b.WriteString(a.viewFooter(i18n.T("add_file.hint")))
 	return b.String()
 }
 
 // ─── Set directory ───────────────────────────────────────────────────────────
 
 func (a *App) renderSetDir() string {
+	labelW := 8
+	a.setDirInput.Width = a.inputWidth(labelW)
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("set_dir.title")))
+	b.WriteString(a.viewHeader(i18n.T("set_dir.title")))
 	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n\n")
-	b.WriteString("  " + i18n.T("set_dir.label") + ": ")
-	b.WriteString(a.setDirInput.View())
+	b.WriteString(a.fieldLine(i18n.T("set_dir.label"), a.setDirInput, true, labelW))
 	if a.setDirFeedback != "" {
 		b.WriteString("\n\n  " + a.setDirFeedback)
 	}
-	b.WriteString("\n\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render(i18n.T("set_dir.hint")))
+	b.WriteString(a.viewFooter(i18n.T("set_dir.hint")))
 	return b.String()
 }
 
@@ -530,26 +671,24 @@ func (a *App) renderSettings() string {
 		i18n.T("settings.label.password"),
 		i18n.T("settings.label.base_path"),
 	}
+	labelW := 12
+	if a.compact() {
+		labelW = 10
+	}
+	for i := range a.settingsInputs {
+		a.settingsInputs[i].Width = a.inputWidth(labelW)
+	}
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("settings.title")))
+	b.WriteString(a.viewHeader(i18n.T("settings.title")))
 	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n\n")
-
-	labelStyle := lipgloss.NewStyle().Foreground(colorMuted).Width(12)
 	for i, label := range labels {
-		if a.settingsFocus == i {
-			b.WriteString("  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("▸ ") + labelStyle.Render(label) + ": ")
-		} else {
-			b.WriteString("    " + labelStyle.Render(label) + ": ")
-		}
-		b.WriteString(a.settingsInputs[i].View())
+		b.WriteString(a.fieldLine(label, a.settingsInputs[i], a.settingsFocus == i, labelW))
 		if i == 2 && a.settingsFocus == 2 {
-			if a.showPassword {
-				b.WriteString("  " + styleMuted.Render(i18n.T("settings.password_hide")))
-			} else {
-				b.WriteString("  " + styleMuted.Render(i18n.T("settings.password_show")))
+			passwordHint := styleMuted.Render(i18n.T("settings.password_hide"))
+			if !a.showPassword {
+				passwordHint = styleMuted.Render(i18n.T("settings.password_show"))
 			}
+			b.WriteString("\n          " + passwordHint)
 		}
 		if i == 3 {
 			b.WriteString("\n          " + styleMuted.Render(i18n.T("settings.base_path_default")))
@@ -559,9 +698,7 @@ func (a *App) renderSettings() string {
 	if a.settingsFeedback != "" {
 		b.WriteString("  " + a.settingsFeedback + "\n\n")
 	}
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render(i18n.T("settings.hint")))
+	b.WriteString(a.viewFooter(i18n.T("settings.hint")))
 	return b.String()
 }
 
@@ -571,14 +708,14 @@ func (a *App) renderConfirmView() string {
 	var b strings.Builder
 
 	// Title
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  ⚠  " + a.confirmTitle))
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n\n")
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorDanger).Render("  " + a.confirmTitle))
+	b.WriteString("\n" + separator(a.contentWidth()) + "\n\n")
 
 	// Message body
-	b.WriteString("  " + a.confirmMsg)
-	b.WriteString("\n\n")
+	for _, line := range wrapText(a.confirmMsg, max(1, a.width-4)) {
+		b.WriteString("  " + line + "\n")
+	}
+	b.WriteString("\n")
 
 	// Action buttons
 	if a.confirmAction != nil {
@@ -595,11 +732,7 @@ func (a *App) renderConfirmView() string {
 		b.WriteString("  " + pillBtnHighlight(i18n.T("common.close")))
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render("  " + i18n.T("confirm.hint_close")))
-
+	b.WriteString(a.viewFooter(i18n.T("confirm.hint_close")))
 	return b.String()
 }
 
@@ -607,10 +740,7 @@ func (a *App) renderConfirmView() string {
 
 func (a *App) renderHelpView() string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("help.title")))
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
+	b.WriteString(a.viewHeader(i18n.T("help.title")))
 
 	sections := []struct {
 		title string
@@ -623,8 +753,13 @@ func (a *App) renderHelpView() string {
 	}
 
 	sectionTitleStyle := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary)
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d1d5db")).Width(14)
+	keyW := 14
+	if a.compact() {
+		keyW = 12
+	}
+	keyStyle := lipgloss.NewStyle().Foreground(colorBarText).Width(keyW)
 	actionStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	actionW := max(1, a.width-8-keyW)
 
 	for si, sec := range sections {
 		if si > 0 {
@@ -634,18 +769,14 @@ func (a *App) renderHelpView() string {
 		for _, item := range sec.items {
 			parts := strings.SplitN(item, "  ", 2)
 			if len(parts) == 2 {
-				b.WriteString("\n    " + keyStyle.Render(parts[0]) + actionStyle.Render(parts[1]))
+				b.WriteString("\n    " + keyStyle.Render(parts[0]) + actionStyle.Render(truncateText(parts[1], actionW)))
 			} else {
-				b.WriteString("\n    " + keyStyle.Render(item))
+				b.WriteString("\n    " + keyStyle.Render(truncateText(item, actionW)))
 			}
 		}
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render("  " + i18n.T("help.hint_close")))
-
+	b.WriteString(a.viewFooter(i18n.T("help.hint_close")))
 	return b.String()
 }
 
@@ -657,49 +788,51 @@ func (a *App) renderNoteView() string {
 	state := a.computeFileState(item)
 
 	// ── Title ──
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("  📝  " + item.FileName))
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
+	b.WriteString(a.viewHeader("[NOTE] " + item.FileName))
 
 	// ── Status line ──
-	b.WriteString("\n")
-	b.WriteString("  " + styleMuted.Render(i18n.T("note.status")+": ") + state.Text)
+	statusParts := []string{
+		styleMuted.Render(i18n.T("note.status")+": ") + state.Text,
+	}
 	if item.Size > 0 {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.size")+": ") + formatKB(item.Size))
+		statusParts = append(statusParts, styleMuted.Render(i18n.T("note.size")+": ")+formatKB(item.Size))
 	}
 	if item.LastUploadTime > 0 {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.uploaded")+": ") + time.UnixMilli(item.LastUploadTime).Format("2006-01-02 15:04"))
+		statusParts = append(statusParts, styleMuted.Render(i18n.T("note.uploaded")+": ")+time.UnixMilli(item.LastUploadTime).Format("2006-01-02 15:04"))
 	}
 	if item.LastUploadUser != "" {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.user")+": ") + item.LastUploadUser)
+		statusParts = append(statusParts, styleMuted.Render(i18n.T("note.user")+": ")+item.LastUploadUser)
 	}
 	b.WriteString("\n")
+	if a.compact() {
+		for _, p := range statusParts {
+			b.WriteString("  " + p + "\n")
+		}
+	} else {
+		b.WriteString("  " + strings.Join(statusParts, "  ") + "\n")
+	}
 
 	// ── Local path ──
 	b.WriteString("\n")
 	dir := a.localDirMap[item.ID]
-	if dir != "" {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + filepath.Join(dir, item.FileName))
-	} else {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + i18n.T("file_list.no_dir"))
+	pathVal := filepath.Join(dir, item.FileName)
+	if dir == "" {
+		pathVal = i18n.T("file_list.no_dir")
 	}
-	b.WriteString("\n")
+	b.WriteString("  " + styleMuted.Render(i18n.T("note.path")+": ") + truncateText(pathVal, max(1, a.width-6)))
+	b.WriteString("\n\n")
 
 	// ── Note ──
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString("\n")
-	if item.Note != "" {
-		b.WriteString("  " + item.Note)
-	} else {
-		b.WriteString("  " + styleMuted.Render(i18n.T("note.empty")))
+	note := item.Note
+	if note == "" {
+		note = i18n.T("note.empty")
 	}
-	b.WriteString("\n\n")
-	b.WriteString(separator(a.width - 4))
+	b.WriteString(separator(a.contentWidth()))
 	b.WriteString("\n")
-	b.WriteString(styleMuted.Render("  " + i18n.T("note.hint_close")))
+	for _, line := range wrapText(note, max(1, a.width-4)) {
+		b.WriteString("  " + line + "\n")
+	}
+	b.WriteString(a.viewFooter(i18n.T("note.hint_close")))
 
 	return b.String()
 }
@@ -710,10 +843,8 @@ func (a *App) renderExportConfigView() string {
 	var b strings.Builder
 
 	// ── Title ──
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("  " + i18n.T("export.title")))
+	b.WriteString(a.viewHeader(i18n.T("export.title")))
 	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n\n")
 
 	// ── Copied hint ──
 	b.WriteString("  " + styleSuccess.Render(i18n.T("export.copied_hint")))
@@ -729,7 +860,7 @@ func (a *App) renderExportConfigView() string {
 	// ── Command box ──
 	b.WriteString("  " + styleMuted.Render(i18n.T("export.command_label")+":"))
 	b.WriteString("\n")
-	boxWidth := min(72, a.width-10)
+	boxWidth := min(72, max(8, a.width-10))
 	b.WriteString("    " + strings.Repeat("\u2500", boxWidth) + "\n")
 	wrapped := wrapString(a.exportCommand, boxWidth)
 	for _, line := range wrapped {
@@ -739,19 +870,45 @@ func (a *App) renderExportConfigView() string {
 	b.WriteString("\n")
 
 	// ── Instruction ──
-	b.WriteString("  " + styleMuted.Render(i18n.T("export.instruction")))
-	b.WriteString("\n\n")
+	for _, line := range wrapText(i18n.T("export.instruction"), max(1, a.width-4)) {
+		b.WriteString("  " + styleMuted.Render(line) + "\n")
+	}
+	b.WriteString("\n")
 
 	// ── Security warning ──
-	b.WriteString("  " + styleDanger.Render(i18n.T("export.security_warning")))
-	b.WriteString("\n\n")
-
-	// ── Separator & close hint ──
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	b.WriteString(styleMuted.Render("  " + i18n.T("export.close_hint")))
+	for _, line := range wrapText(i18n.T("export.security_warning"), max(1, a.width-4)) {
+		b.WriteString("  " + styleDanger.Render(line) + "\n")
+	}
+	b.WriteString(a.viewFooter(i18n.T("export.close_hint")))
 
 	return b.String()
+}
+
+// wrapText splits a string into display-width-aware lines no longer than width.
+func wrapText(s string, width int) []string {
+	if width <= 0 {
+		return []string{s}
+	}
+	var lines []string
+	cur := ""
+	curW := 0
+	for _, r := range s {
+		w := lipgloss.Width(string(r))
+		if curW+w > width && cur != "" {
+			lines = append(lines, strings.TrimRight(cur, " "))
+			cur = ""
+			curW = 0
+		}
+		cur += string(r)
+		curW += w
+	}
+	if cur != "" {
+		lines = append(lines, strings.TrimRight(cur, " "))
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 // wrapString splits a long string into lines no longer than width,
@@ -798,13 +955,11 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 	var b strings.Builder
 
 	// ── Title ──
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(i18n.T("sync.result.title")))
+	title := i18n.T("sync.result.title")
 	if result.IsAuto {
-		b.WriteString(styleMuted.Render(i18n.T("sync.result.auto")))
+		title += " " + i18n.T("sync.result.auto")
 	}
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
+	b.WriteString(a.viewHeader(title))
 
 	// ── Progress bar (when still syncing) ──
 	if a.syncing && len(a.syncItems) > 0 {
@@ -813,21 +968,16 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 		if done > total {
 			done = total
 		}
-		barWidth := min(40, a.width-10)
-		if barWidth < 4 {
-			barWidth = 4
-		}
+		barWidth := min(40, max(4, a.width-10))
 		filled := 0
 		if total > 0 {
 			filled = done * barWidth / total
 		}
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-		progress := fmt.Sprintf("  [%s] %d/%d", bar, done, total)
-		b.WriteString("\n" + progress)
-		// Show current file being processed
+		b.WriteString("\n" + fmt.Sprintf("  [%s] %d/%d", bar, done, total))
 		if done < total {
 			curItem := a.syncItems[done]
-			b.WriteString("\n  " + styleMuted.Render(i18n.T("sync.processing")+": ") + truncate(curItem.FileName, 30))
+			b.WriteString("\n  " + styleMuted.Render(i18n.T("sync.processing")+": ") + truncateText(curItem.FileName, max(1, a.width-6)))
 		}
 		b.WriteString("\n\n")
 	} else {
@@ -855,13 +1005,22 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 	if s.Unbound > 0 {
 		summaryItems = append(summaryItems, styleMuted.Render(fmt.Sprintf(i18n.T("sync.result.unbound"), s.Unbound)))
 	}
-	b.WriteString(strings.Join(summaryItems, "  "))
+	summarySep := "  "
+	if a.compact() {
+		summarySep = " "
+	}
+	summaryLine := strings.Join(summaryItems, summarySep)
+	if lipgloss.Width(summaryLine) > max(1, a.width-2) {
+		summaryLine = truncateText(summaryLine, max(1, a.width-2))
+	}
+	b.WriteString(summaryLine)
 	b.WriteString("\n")
 
 	// ── Detail table ──
 	if len(result.Details) > 0 {
 		b.WriteString("\n")
-		b.WriteString("  " + separator(a.width-8))
+		sepW := max(2, a.width-8)
+		b.WriteString("  " + separator(sepW))
 		b.WriteString("\n")
 
 		// Sort: failures first
@@ -876,59 +1035,54 @@ func (a *App) renderSyncResult(result model.SyncResult) string {
 			}
 		}
 
-		// Table header
+		compact := a.compact()
+		fileW := 14
+		actionW := 8
+		if compact {
+			fileW, actionW = 10, 6
+		}
+		reasonW := max(1, a.width-8-fileW-actionW-6)
 		hdrStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
-		b.WriteString("  " + hdrStyle.Render(fmt.Sprintf("%-4s  %-14s  %-8s  %s", "", i18n.T("sync.result.header_file"), i18n.T("sync.result.header_action"), i18n.T("sync.result.header_result"))))
+		fileHdr := hdrStyle.Width(fileW).Render(i18n.T("sync.result.header_file"))
+		actionHdr := hdrStyle.Width(actionW).Render(i18n.T("sync.result.header_action"))
+		resultHdr := hdrStyle.Width(reasonW).Render(i18n.T("sync.result.header_result"))
+		b.WriteString("  " + fileHdr + "  " + actionHdr + "  " + resultHdr)
 		b.WriteString("\n")
-		b.WriteString("  " + separator(a.width-8))
+		b.WriteString("  " + separator(sepW))
 		b.WriteString("\n")
 
+		cellStyle := lipgloss.NewStyle().Foreground(colorBarText)
 		for _, d := range sorted {
-			mark := styleSuccess.Render("✔")
+			mark := styleSuccess.Render("+")
 			if d.Status == failLabel {
-				mark = styleDanger.Render("✕")
+				mark = styleDanger.Render("x")
 			}
 			reasonStyle := styleMuted
 			if d.Status == failLabel {
 				reasonStyle = styleDanger
 			}
-			fileName := truncate(d.FileName, 14)
-			b.WriteString(fmt.Sprintf("  %s  %-14s  %-8s  %s\n",
-				mark,
-				lipgloss.NewStyle().Render(fileName),
-				lipgloss.NewStyle().Render(d.Action),
-				reasonStyle.Render(d.Reason),
-			))
+			fileName := truncateText(d.FileName, fileW)
+			action := truncateText(d.Action, actionW)
+			reason := truncateText(d.Reason, reasonW)
+			b.WriteString("  " + mark + "  " +
+				cellStyle.Width(fileW).Render(fileName) + "  " +
+				cellStyle.Width(actionW).Render(action) + "  " +
+				reasonStyle.Render(reason) + "\n")
 		}
-		b.WriteString("  " + separator(a.width-8))
+		b.WriteString("  " + separator(sepW))
 	}
 
-	b.WriteString("\n")
-	b.WriteString(separator(a.width - 4))
-	b.WriteString("\n")
-	if a.syncing {
-		b.WriteString(styleMuted.Render("  " + i18n.T("sync.result.syncing_hint")))
-	} else {
-		b.WriteString(styleMuted.Render("  " + i18n.T("sync.result.close_hint")))
-	}
+	b.WriteString(a.viewFooter(func() string {
+		if a.syncing {
+			return i18n.T("sync.result.syncing_hint")
+		}
+		return i18n.T("sync.result.close_hint")
+	}()))
 
 	return b.String()
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-func truncate(s string, maxLen int) string {
-	if maxLen <= 0 {
-		return ""
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-1] + "..."
-}
 
 func min(a, b int) int {
 	if a < b {

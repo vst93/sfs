@@ -19,7 +19,10 @@ func TestExpandUserPath(t *testing.T) {
 }
 
 func TestNormalizeLocalPathResolvesRelativePath(t *testing.T) {
-	workingDir := t.TempDir()
+	workingDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	oldWorkingDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

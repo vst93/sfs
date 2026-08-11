@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -16,13 +17,16 @@ import (
 const (
 	repoOwner = "vst93"
 	repoName  = "sfs"
+
+	// BrewFormula is the fully-qualified formula used for package-managed updates.
+	BrewFormula = "vst93/tap/sfs"
 )
 
 // Release represents a GitHub release.
 type Release struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
+	TagName    string  `json:"tag_name"`
+	Prerelease bool    `json:"prerelease"`
+	Draft      bool    `json:"draft"`
 	Assets     []Asset `json:"assets"`
 }
 
@@ -40,6 +44,20 @@ type CheckResult struct {
 	DownloadURL   string
 	IsBrew        bool
 	Error         error
+}
+
+// PreparedUpdate is a downloaded and extracted update waiting to be installed.
+// Cleanup must be called after the update has either been applied or abandoned.
+type PreparedUpdate struct {
+	BinaryPath string
+	TempDir    string
+}
+
+// Cleanup removes the staged update files.
+func (p PreparedUpdate) Cleanup() {
+	if p.TempDir != "" {
+		_ = os.RemoveAll(p.TempDir)
+	}
 }
 
 // CompareVersions compares two semver-like version strings (e.g. "0.2.0" vs "0.1.1").
@@ -71,18 +89,39 @@ func CompareVersions(a, b string) int {
 
 // IsBrewInstall checks if the current binary was installed via Homebrew.
 func IsBrewInstall() bool {
-	exePath, err := os.Executable()
+	exePath, err := CurrentExecutable()
 	if err != nil {
 		return false
 	}
-	realPath, err := filepath.EvalSymlinks(exePath)
-	if err != nil {
-		realPath = exePath
-	}
-	lower := strings.ToLower(realPath)
+	return IsBrewPath(exePath)
+}
+
+// IsBrewPath reports whether a resolved executable path belongs to Homebrew.
+func IsBrewPath(path string) bool {
+	lower := strings.ToLower(filepath.ToSlash(path))
 	return strings.Contains(lower, "/homebrew/") ||
 		strings.Contains(lower, "/.linuxbrew/") ||
-		strings.Contains(lower, "/Cellar/")
+		strings.Contains(lower, "/cellar/")
+}
+
+// BrewExecutable locates brew, including when sfs is launched with a restricted PATH.
+func BrewExecutable() (string, error) {
+	if path, err := exec.LookPath("brew"); err == nil {
+		return path, nil
+	}
+
+	exePath, err := CurrentExecutable()
+	if err == nil {
+		lower := strings.ToLower(filepath.ToSlash(exePath))
+		if idx := strings.Index(lower, "/cellar/"); idx >= 0 {
+			candidate := filepath.Join(exePath[:idx], "bin", "brew")
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return candidate, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("brew executable not found")
 }
 
 // PlatformAssetName returns the expected release asset filename for the current platform.
@@ -123,6 +162,11 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 		result.Error = err
 		return result
 	}
+	return evaluateRelease(release, currentVersion, result.IsBrew)
+}
+
+func evaluateRelease(release Release, currentVersion string, isBrew bool) CheckResult {
+	result := CheckResult{IsBrew: isBrew}
 
 	// Safety: skip pre-releases and drafts (API /latest should already filter, but be explicit).
 	if release.Prerelease || release.Draft {
@@ -138,15 +182,19 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 		return result
 	}
 
+	// Homebrew owns its installation. It does not need a platform archive in the
+	// release because brew will fetch the formula's configured artifact itself.
+	if isBrew {
+		result.HasUpdate = true
+		return result
+	}
+
 	// Find the asset matching the current platform.
 	assetName := PlatformAssetName()
 	for _, asset := range release.Assets {
 		if asset.Name == assetName {
 			result.HasUpdate = true
-			// For brew installs, don't set DownloadURL — user should use brew upgrade
-			if !result.IsBrew {
-				result.DownloadURL = asset.BrowserDownloadURL
-			}
+			result.DownloadURL = asset.BrowserDownloadURL
 			return result
 		}
 	}
@@ -159,67 +207,149 @@ func CheckLatestRelease(currentVersion string) CheckResult {
 // If total is unknown, it will be -1.
 type ProgressCallback func(downloaded, total int64)
 
-// DownloadAndUpdate downloads the release zip for the current platform and
-// replaces the running binary. On Unix it renames the old binary to .old first.
-// The progress callback is optional and can be nil.
-func DownloadAndUpdate(downloadURL string, progress ProgressCallback) error {
-	// 1. Create temp directory for the download.
+// PrepareUpdate downloads and extracts the release into a user-owned temp dir.
+func PrepareUpdate(downloadURL string, progress ProgressCallback) (PreparedUpdate, error) {
+	if strings.TrimSpace(downloadURL) == "" {
+		return PreparedUpdate{}, fmt.Errorf("download URL is empty")
+	}
+
 	tmpDir, err := os.MkdirTemp("", "sfs-update-*")
 	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
+		return PreparedUpdate{}, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	prepared := PreparedUpdate{TempDir: tmpDir}
+	failed := true
+	defer func() {
+		if failed {
+			prepared.Cleanup()
+		}
+	}()
 
-	// 2. Download the zip file.
 	zipPath := filepath.Join(tmpDir, "update.zip")
 	if err := downloadFile(downloadURL, zipPath, progress); err != nil {
-		return fmt.Errorf("download: %w", err)
+		return PreparedUpdate{}, fmt.Errorf("download: %w", err)
 	}
 
-	// 3. Extract the binary from the zip.
 	newBinaryPath, err := extractBinary(zipPath, tmpDir)
 	if err != nil {
-		return fmt.Errorf("extract: %w", err)
+		return PreparedUpdate{}, fmt.Errorf("extract: %w", err)
 	}
+	prepared.BinaryPath = newBinaryPath
+	failed = false
+	return prepared, nil
+}
 
-	// 4. Locate the current executable.
+// CurrentExecutable returns the resolved path of the running binary.
+func CurrentExecutable() (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("get executable path: %w", err)
+		return "", fmt.Errorf("get executable path: %w", err)
 	}
 	exePath, err = filepath.EvalSymlinks(exePath)
 	if err != nil {
-		return fmt.Errorf("resolve executable path: %w", err)
+		return "", fmt.Errorf("resolve executable path: %w", err)
+	}
+	return exePath, nil
+}
+
+// NeedsElevation reports whether replacing target requires elevated privileges.
+// Directory write access is what controls an atomic rename on Unix.
+func NeedsElevation(target string) (bool, error) {
+	probe, err := os.CreateTemp(filepath.Dir(target), ".sfs-update-probe-*")
+	if err == nil {
+		name := probe.Name()
+		_ = probe.Close()
+		_ = os.Remove(name)
+		return false, nil
+	}
+	if os.IsPermission(err) {
+		return true, nil
+	}
+	return false, fmt.Errorf("check update permission: %w", err)
+}
+
+// ApplyCurrentBinary replaces the running executable with a prepared binary.
+func ApplyCurrentBinary(source string) error {
+	target, err := CurrentExecutable()
+	if err != nil {
+		return err
+	}
+	return ReplaceBinary(source, target)
+}
+
+// ReplaceBinary atomically replaces target and rolls back if installation fails.
+func ReplaceBinary(source, target string) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open staged binary: %w", err)
+	}
+	defer input.Close()
+	if info, statErr := input.Stat(); statErr != nil || !info.Mode().IsRegular() {
+		if statErr != nil {
+			return fmt.Errorf("stat staged binary: %w", statErr)
+		}
+		return fmt.Errorf("staged update is not a regular file")
 	}
 
-	// 5. Backup the current binary (rename to .old).
-	backupPath := exePath + ".old"
-	_ = os.Remove(backupPath) // remove stale backup if any
-	if err := os.Rename(exePath, backupPath); err != nil {
+	targetDir := filepath.Dir(target)
+	staged, err := os.CreateTemp(targetDir, ".sfs-update-*")
+	if err != nil {
+		return fmt.Errorf("stage binary beside target: %w", err)
+	}
+	stagedPath := staged.Name()
+	defer os.Remove(stagedPath)
+
+	if _, err := io.Copy(staged, input); err != nil {
+		_ = staged.Close()
+		return fmt.Errorf("copy staged binary: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := staged.Chmod(0755); err != nil {
+			_ = staged.Close()
+			return fmt.Errorf("chmod staged binary: %w", err)
+		}
+	}
+	if err := staged.Sync(); err != nil {
+		_ = staged.Close()
+		return fmt.Errorf("sync staged binary: %w", err)
+	}
+	if err := staged.Close(); err != nil {
+		return fmt.Errorf("close staged binary: %w", err)
+	}
+
+	backupPath := target + ".old"
+	if err := os.Remove(backupPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale backup: %w", err)
+	}
+	if err := os.Rename(target, backupPath); err != nil {
 		return fmt.Errorf("backup current binary: %w", err)
 	}
 
-	// 6. Move the new binary into place.
-	if err := os.Rename(newBinaryPath, exePath); err != nil {
-		// Attempt rollback.
-		_ = os.Rename(backupPath, exePath)
+	if err := os.Rename(stagedPath, target); err != nil {
+		_ = os.Rename(backupPath, target)
 		return fmt.Errorf("replace binary: %w", err)
 	}
 
-	// 7. Ensure executable permission on Unix.
 	if runtime.GOOS != "windows" {
-		if err := os.Chmod(exePath, 0755); err != nil {
+		if err := os.Chmod(target, 0755); err != nil {
+			_ = os.Remove(target)
+			_ = os.Rename(backupPath, target)
 			return fmt.Errorf("chmod: %w", err)
 		}
 	}
 
-	// 8. Best-effort cleanup of the .old file after a short delay.
-	go func() {
-		time.Sleep(5 * time.Second)
-		_ = os.Remove(backupPath)
-	}()
-
+	_ = os.Remove(backupPath)
 	return nil
+}
+
+// DownloadAndUpdate downloads and applies an update without elevation.
+func DownloadAndUpdate(downloadURL string, progress ProgressCallback) error {
+	prepared, err := PrepareUpdate(downloadURL, progress)
+	if err != nil {
+		return err
+	}
+	defer prepared.Cleanup()
+	return ApplyCurrentBinary(prepared.BinaryPath)
 }
 
 // downloadFile downloads url to the given local path.
