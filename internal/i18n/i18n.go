@@ -443,9 +443,9 @@ var translations = map[Locale]map[string]string{
 
 		// ── File status keys ────────────────────────────────────────────────
 		"status.matched":        "Synced",
-		"status.pending_upload": "To Upload",
-		"status.download":       "To Download",
-		"status.initial_upload": "First Upload",
+		"status.pending_upload": "Upload",
+		"status.download":       "Download",
+		"status.initial_upload": "New",
 		"status.missing":        "Missing",
 		"status.conflict":       "Conflict",
 		"status.unbound":        "Unbound",
