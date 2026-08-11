@@ -505,6 +505,9 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		nameS + strings.Repeat(" ", pad) + "  " +
 		statusStyle.Render(statusText) +
 		rightS
+	if selected {
+		line = lipgloss.NewStyle().Background(colorSelectedBg).Render(line)
+	}
 	return line
 }
 

@@ -9,16 +9,17 @@ import (
 // ── Color palette ────────────────────────────────────────────────────────────
 
 var (
-	colorPrimary   = adaptiveColor("#0F766E", "#2DD4BF", "30", "43", "6", "6")
-	colorSuccess   = adaptiveColor("#15803D", "#4ADE80", "28", "78", "2", "2")
-	colorWarning   = adaptiveColor("#A16207", "#FBBF24", "136", "220", "3", "3")
-	colorDanger    = adaptiveColor("#BE123C", "#FB7185", "161", "204", "1", "1")
-	colorMuted     = adaptiveColor("#64748B", "#94A3B8", "102", "145", "8", "8")
-	colorBarText   = adaptiveColor("#334155", "#CBD5E1", "59", "252", "0", "7")
-	colorHighlight = adaptiveColor("#0F172A", "#F8FAFC", "16", "231", "0", "15")
-	colorDim       = adaptiveColor("#CBD5E1", "#334155", "252", "59", "7", "8")
-	colorBorder    = adaptiveColor("#94A3B8", "#475569", "145", "102", "8", "8")
-	colorOnAccent  = adaptiveColor("#FFFFFF", "#071B1A", "15", "16", "15", "0")
+	colorPrimary    = adaptiveColor("#0F766E", "#2DD4BF", "30", "43", "6", "6")
+	colorSuccess    = adaptiveColor("#15803D", "#4ADE80", "28", "78", "2", "2")
+	colorWarning    = adaptiveColor("#A16207", "#FBBF24", "136", "220", "3", "3")
+	colorDanger     = adaptiveColor("#BE123C", "#FB7185", "161", "204", "1", "1")
+	colorMuted      = adaptiveColor("#64748B", "#94A3B8", "102", "145", "8", "8")
+	colorBarText    = adaptiveColor("#334155", "#CBD5E1", "59", "252", "0", "7")
+	colorHighlight  = adaptiveColor("#0F172A", "#F8FAFC", "16", "231", "0", "15")
+	colorSelectedBg = adaptiveColor("#DDF3F0", "#164E4A", "195", "23", "7", "0")
+	colorDim        = adaptiveColor("#CBD5E1", "#334155", "252", "59", "7", "8")
+	colorBorder     = adaptiveColor("#94A3B8", "#475569", "145", "102", "8", "8")
+	colorOnAccent   = adaptiveColor("#FFFFFF", "#071B1A", "15", "16", "15", "0")
 )
 
 func adaptiveColor(light, dark, light256, dark256, lightANSI, darkANSI string) lipgloss.CompleteAdaptiveColor {

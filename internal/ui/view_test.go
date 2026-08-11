@@ -50,7 +50,7 @@ func TestFileLineFitsTerminal(t *testing.T) {
 	}
 }
 
-func TestSelectedFileLineUsesPortableFocusStyle(t *testing.T) {
+func TestSelectedFileLineUsesPortableFocusStyleAndBackground(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	app := &App{width: 80}
 	line := app.fileLine(1, model.FileRecord{FileName: "settings.json"}, model.FileStatus{Key: "matched"}, true)
@@ -58,8 +58,8 @@ func TestSelectedFileLineUsesPortableFocusStyle(t *testing.T) {
 	if !strings.HasPrefix(plain, "> ") {
 		t.Fatalf("selected row does not start with the portable focus cursor: %q", plain)
 	}
-	if strings.Contains(line, "\x1b[48;") {
-		t.Fatalf("selected row contains a background color sequence: %q", line)
+	if !strings.Contains(line, "\x1b[48;") {
+		t.Fatalf("selected row does not contain a background color sequence: %q", line)
 	}
 }
 
