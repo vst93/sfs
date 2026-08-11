@@ -432,9 +432,9 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if !compact {
 		idxStr = fmt.Sprintf("%d", idx)
 	}
-	statusW := 10
-	if compact {
-		statusW = 0
+	statusW := 0
+	if !compact {
+		statusW = lipgloss.Width(stText)
 	}
 	prefixW := 5 // focus marker, status icon, and spacing
 	if !compact {
