@@ -469,10 +469,13 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 
 	nameS := name
 	if selected {
-		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(name)
+		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(name)
 	}
 
 	rightS := styleMuted.Render(rightPlain)
+	if selected {
+		rightS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(rightPlain)
+	}
 
 	cursorS := "  "
 	if selected {
