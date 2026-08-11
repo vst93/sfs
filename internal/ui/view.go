@@ -280,16 +280,7 @@ func (a *App) renderFileList() string {
 		title += styleMuted.Render("  SMALL FILE SYNC")
 	}
 	title += styleMuted.Render("  v" + model.AppVersion)
-	connection := styleDanger.Render(i18n.T("bottom.storage_unconfigured"))
-	if a.isStorageConfigured() {
-		connection = styleSuccess.Render("WebDAV")
-	}
-	if lipgloss.Width(title)+lipgloss.Width(connection)+3 <= a.width {
-		gap := max(1, a.width-lipgloss.Width(title)-lipgloss.Width(connection)-2)
-		b.WriteString(title + strings.Repeat(" ", gap) + connection)
-	} else {
-		b.WriteString(title)
-	}
+	b.WriteString(title)
 	b.WriteString("\n" + separator(max(2, a.width-2)) + "\n")
 
 	// ── Status rail: stats (left) · auto-sync (right) ──
@@ -456,10 +447,6 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	}
 	nameW = max(4, nameW)
 	name := truncateText(item.FileName, nameW)
-	pad := nameW - lipgloss.Width(name)
-	if pad < 0 {
-		pad = 0
-	}
 
 	// ── Styled ──
 	idxS := ""
@@ -472,13 +459,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(name)
 	}
 
-	// Selected row: brighter right-side info; unselected: muted
-	var rightS string
-	if selected {
-		rightS = lipgloss.NewStyle().Foreground(colorBarText).Render(rightPlain)
-	} else {
-		rightS = styleMuted.Render(rightPlain)
-	}
+	rightS := styleMuted.Render(rightPlain)
 
 	cursorS := "  "
 	if selected {
@@ -501,9 +482,14 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if selected {
 		iconStyle = iconStyle.Bold(true)
 	}
+	metadataSeparator := ""
+	if statusText != "" && rightPlain != "" {
+		metadataSeparator = styleMuted.Render(" · ")
+	}
 	line += iconStyle.Render(stIcon) + " " +
-		nameS + strings.Repeat(" ", pad) + "  " +
+		nameS + "  " +
 		statusStyle.Render(statusText) +
+		metadataSeparator +
 		rightS
 	if selected {
 		line = lipgloss.NewStyle().Background(colorSelectedBg).Render(line)
