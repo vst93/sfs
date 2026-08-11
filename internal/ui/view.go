@@ -273,19 +273,24 @@ func (a *App) renderFileList() string {
 
 	var b strings.Builder
 
-	// ── Top header ──
+	// ── Top header and status rail ──
 	_, matched, pending, unbound := a.countStats()
-	b.WriteString(" " + model.AppFullName + styleMuted.Render("  v"+model.AppVersion))
-	b.WriteString("\n\n")
+	title := " " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("SFS")
+	if !a.compact() {
+		title += styleMuted.Render("  SMALL FILE SYNC")
+	}
+	title += styleMuted.Render("  v" + model.AppVersion)
+	b.WriteString(title)
+	b.WriteString("\n" + separator(max(2, a.width-2)) + "\n")
 
-	// ── Info bar: stats (left) · auto-sync (right) ──
+	// ── Status rail: stats (left) · auto-sync (right) ──
 	chipStyle := lipgloss.NewStyle().Foreground(colorMuted)
-	chipStyleSuccess := lipgloss.NewStyle().Foreground(colorSuccess)
-	chipStyleWarning := lipgloss.NewStyle().Foreground(colorWarning)
+	chipStyleSuccess := lipgloss.NewStyle().Bold(true).Foreground(colorSuccess)
+	chipStyleWarning := lipgloss.NewStyle().Bold(true).Foreground(colorWarning)
 
 	// Left: file stats
 	leftParts := []string{}
-	leftParts = append(leftParts, fmt.Sprintf(i18n.T("file_list.files_count"), total))
+	leftParts = append(leftParts, lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(fmt.Sprintf(i18n.T("file_list.files_count"), total)))
 	leftParts = append(leftParts, chipStyleSuccess.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.matched_short"), matched)))
 	leftParts = append(leftParts, chipStyleWarning.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.pending_short"), pending)))
 	if unbound > 0 {
@@ -306,29 +311,28 @@ func (a *App) renderFileList() string {
 		} else {
 			countdownStr = stylePrimary.Render(countdownStr)
 		}
-		right = chipStyle.Render("⟳ ") + autoLabel + "  " + countdownStr
+		right = chipStyle.Render("AUTO ") + autoLabel + "  " + countdownStr
 		if !a.lastSyncTime.IsZero() {
 			right += chipStyle.Render(fmt.Sprintf("  ·  %s %s", i18n.T("file_list.last_sync"), a.lastSyncTime.Format("15:04:05")))
 		}
 	}
 
-	// Keep both halves on one line, hiding the optional right side first on
-	// terminals too narrow to fit the complete info bar.
+	// Hide the clock before allowing it to collide with the status summary.
 	leftW := lipgloss.Width(left)
 	rightW := lipgloss.Width(right)
-	if leftW+rightW+4 > a.width {
+	if leftW+rightW+5 > a.width {
 		right = ""
 		rightW = 0
 	}
-	if leftW > max(1, a.width-5) {
-		left = lipgloss.NewStyle().MaxWidth(max(1, a.width-5)).Render(left)
+	if leftW > max(2, a.width-3) {
+		left = truncateText(left, max(2, a.width-3))
 		leftW = lipgloss.Width(left)
 	}
-	gap := a.width - leftW - rightW - 4
+	gap := a.width - leftW - rightW - 3
 	if gap < 1 {
 		gap = 1
 	}
-	b.WriteString("  " + left + strings.Repeat(" ", gap) + right + "  ")
+	b.WriteString(" " + left + strings.Repeat(" ", gap) + right + " ")
 	b.WriteString("\n")
 
 	// ── List rows ──
@@ -398,69 +402,99 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		stText, stColor, stIcon = "", colorMuted, " "
 	}
 
-	// ── Right part ──
+	// ── Right metadata progressively collapses on narrow terminals. ──
 	rightParts := []string{}
-	if item.Size > 0 {
+	if item.Size > 0 && a.width >= 58 {
 		rightParts = append(rightParts, formatKB(item.Size))
 	}
-	if item.LastUploadTime > 0 {
+	if item.LastUploadTime > 0 && a.width >= 76 {
 		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
 	}
+	// Always try to show the note on the row; the fit-check below drops it
+	// (and the other right-side metadata) if the filename would get too cramped.
 	if item.Note != "" {
 		rightParts = append(rightParts, item.Note)
 	}
 	rightPlain := strings.Join(rightParts, "  ")
 
 	// ── Layout calc ──
-	idxStr := fmt.Sprintf("%d", idx)
-	const fixedW = 22 // cursor, index, spacing, filename gap, and status column
-	iconW := max(1, lipgloss.Width(stIcon))
+	compact := a.compact()
+	idxStr := ""
+	if !compact {
+		idxStr = fmt.Sprintf("%d", idx)
+	}
+	statusW := 0
+	if !compact {
+		statusW = lipgloss.Width(stText)
+	}
+	prefixW := 5 // focus marker, status icon, and spacing
+	if !compact {
+		prefixW = 8 // adds the index column
+	}
 	rightW := lipgloss.Width(rightPlain)
-	nameW := a.width - fixedW - iconW - rightW
-	if nameW > 35 {
-		nameW = 35
+	nameW := a.width - prefixW - statusW - rightW - 5
+	if nameW > 36 {
+		nameW = 36
 	}
-	if nameW < 4 {
+	if nameW < 8 {
 		rightPlain = ""
-		nameW = a.width - fixedW - iconW
+		rightW = 0
+		nameW = a.width - prefixW - statusW - 5
 	}
-	nameW = max(0, min(35, nameW))
+	if nameW < 8 && statusW > 0 {
+		statusW = 0
+		nameW = a.width - prefixW - 5
+	}
+	nameW = max(4, nameW)
 	name := truncateText(item.FileName, nameW)
-	pad := nameW - lipgloss.Width(name)
-	if pad < 0 {
-		pad = 0
-	}
 
 	// ── Styled ──
-	idxS := lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+	idxS := ""
+	if !compact {
+		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(2).Align(lipgloss.Right).Render(idxStr)
+	}
 
 	nameS := name
 	if selected {
 		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(name)
 	}
 
-	cursorS := "   "
+	rightS := styleMuted.Render(rightPlain)
+
+	cursorS := "  "
 	if selected {
-		cursorS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(" ▸ ")
+		cursorS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("> ")
 	}
 
-	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(12)
+	statusText := ""
+	if statusW > 0 {
+		statusText = stText
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(statusW)
 	if selected {
 		statusStyle = statusStyle.Bold(true)
+	}
+	line := cursorS
+	if !compact {
+		line += idxS + " "
 	}
 	iconStyle := lipgloss.NewStyle().Foreground(stColor)
 	if selected {
 		iconStyle = iconStyle.Bold(true)
 	}
-	line := cursorS + idxS + " " +
-		iconStyle.Render(stIcon) + " " +
-		nameS + strings.Repeat(" ", pad) + "  " +
-		statusStyle.Render(stText) +
-		styleMuted.Render(rightPlain)
+	metadataSeparator := ""
+	if statusText != "" && rightPlain != "" {
+		metadataSeparator = styleMuted.Render(" · ")
+	}
+	line += iconStyle.Render(stIcon) + " " +
+		nameS + "  " +
+		statusStyle.Render(statusText) +
+		metadataSeparator +
+		rightS
 	if selected {
 		line = lipgloss.NewStyle().Background(colorSelectedBg).Render(line)
 	}
-	return lipgloss.NewStyle().MaxWidth(max(0, a.width)).Render(line)
+	return line
 }
 
 func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
