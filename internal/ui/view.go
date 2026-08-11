@@ -281,7 +281,7 @@ func (a *App) renderFileList() string {
 	}
 	title += styleMuted.Render("  v" + model.AppVersion)
 	b.WriteString(title)
-	b.WriteString("\n" + separator(max(2, a.width-2)) + "\n")
+	b.WriteString("\n\n")
 
 	// ── Status rail: stats (left) · auto-sync (right) ──
 	chipStyle := lipgloss.NewStyle().Foreground(colorMuted)
@@ -432,18 +432,31 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		prefixW = 8 // adds the index column
 	}
 	rightW := lipgloss.Width(rightPlain)
-	nameW := a.width - prefixW - statusW - rightW - 5
+	const tabWidth = 4
+	spacingW := 0
+	if statusW > 0 || rightW > 0 {
+		spacingW = tabWidth
+	}
+	if statusW > 0 && rightW > 0 {
+		spacingW += lipgloss.Width(" · ") + tabWidth
+	}
+	nameW := a.width - prefixW - statusW - rightW - spacingW
 	if nameW > 36 {
 		nameW = 36
 	}
 	if nameW < 8 {
 		rightPlain = ""
 		rightW = 0
-		nameW = a.width - prefixW - statusW - 5
+		spacingW = 0
+		if statusW > 0 {
+			spacingW = tabWidth
+		}
+		nameW = a.width - prefixW - statusW - spacingW
 	}
 	if nameW < 8 && statusW > 0 {
 		statusW = 0
-		nameW = a.width - prefixW - 5
+		spacingW = 0
+		nameW = a.width - prefixW
 	}
 	nameW = max(4, nameW)
 	name := truncateText(item.FileName, nameW)
@@ -482,19 +495,20 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if selected {
 		iconStyle = iconStyle.Bold(true)
 	}
-	metadataSeparator := ""
-	if statusText != "" && rightPlain != "" {
-		metadataSeparator = styleMuted.Render(" · ")
+	line += iconStyle.Render(stIcon) + " " + nameS
+	if statusText != "" {
+		line += "\t" + statusStyle.Render(statusText)
 	}
-	line += iconStyle.Render(stIcon) + " " +
-		nameS + "  " +
-		statusStyle.Render(statusText) +
-		metadataSeparator +
-		rightS
+	if rightPlain != "" {
+		if statusText != "" {
+			line += styleMuted.Render(" · ")
+		}
+		line += "\t" + rightS
+	}
 	if selected {
-		line = lipgloss.NewStyle().Background(colorSelectedBg).Render(line)
+		return lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).TabWidth(tabWidth).Render(line)
 	}
-	return line
+	return lipgloss.NewStyle().TabWidth(tabWidth).Render(line)
 }
 
 func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {

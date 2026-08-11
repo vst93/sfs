@@ -38,7 +38,7 @@ func TestFileLineFitsTerminal(t *testing.T) {
 	profiles := []termenv.Profile{termenv.Ascii, termenv.ANSI, termenv.ANSI256, termenv.TrueColor}
 	for _, profile := range profiles {
 		lipgloss.SetColorProfile(profile)
-		for _, width := range []int{40, 72, 120} {
+		for _, width := range []int{40, 62, 90, 120} {
 			app := &App{width: width}
 			for _, selected := range []bool{false, true} {
 				line := app.fileLine(12, item, state, selected)
@@ -50,7 +50,7 @@ func TestFileLineFitsTerminal(t *testing.T) {
 	}
 }
 
-func TestSelectedFileLineUsesPortableFocusStyleAndBackground(t *testing.T) {
+func TestSelectedFileLineUsesPortableFocusStyleAndForeground(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	app := &App{width: 80}
 	line := app.fileLine(1, model.FileRecord{FileName: "settings.json"}, model.FileStatus{Key: "matched"}, true)
@@ -58,8 +58,12 @@ func TestSelectedFileLineUsesPortableFocusStyleAndBackground(t *testing.T) {
 	if !strings.HasPrefix(plain, "> ") {
 		t.Fatalf("selected row does not start with the portable focus cursor: %q", plain)
 	}
-	if !strings.Contains(line, "\x1b[48;") {
-		t.Fatalf("selected row does not contain a background color sequence: %q", line)
+	if strings.Contains(line, "\x1b[48;") {
+		t.Fatalf("selected row contains a background color sequence: %q", line)
+	}
+	accentPrefix := strings.SplitN(lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("selected"), "selected", 2)[0]
+	if !strings.HasPrefix(line, accentPrefix) {
+		t.Fatalf("selected row does not use the primary foreground accent: %q", line)
 	}
 }
 
