@@ -413,7 +413,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 
 	// ── Layout calc ──
 	idxStr := fmt.Sprintf("%d", idx)
-	const fixedW = 22 // cursor, index, spacing, filename gap, and status column
+	const fixedW = 19 // cursor, index, spacing, filename gap, and status column
 	iconW := max(1, lipgloss.Width(stIcon))
 	rightW := lipgloss.Width(rightPlain)
 	nameW := a.width - fixedW - iconW - rightW
@@ -432,7 +432,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	}
 
 	// ── Styled ──
-	idxS := lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+	idxS := lipgloss.NewStyle().Foreground(colorMuted).Width(2).Align(lipgloss.Right).Render(idxStr)
 
 	nameS := name
 	if selected {
@@ -444,7 +444,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		cursorS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(" ▸ ")
 	}
 
-	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(12)
+	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(10)
 	if selected {
 		statusStyle = statusStyle.Bold(true)
 	}
