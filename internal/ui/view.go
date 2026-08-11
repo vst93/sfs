@@ -415,7 +415,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if item.Note != "" {
 		rightParts = append(rightParts, item.Note)
 	}
-	rightPlain := strings.Join(rightParts, "  ")
+	rightPlain := strings.Join(rightParts, " · ")
 
 	// ── Layout calc ──
 	compact := a.compact()
@@ -438,7 +438,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		spacingW = tabWidth
 	}
 	if statusW > 0 && rightW > 0 {
-		spacingW += lipgloss.Width(" · ") + tabWidth
+		spacingW += tabWidth
 	}
 	nameW := a.width - prefixW - statusW - rightW - spacingW
 	if nameW > 36 {
@@ -500,9 +500,6 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		line += "\t" + statusStyle.Render(statusText)
 	}
 	if rightPlain != "" {
-		if statusText != "" {
-			line += styleMuted.Render(" · ")
-		}
 		line += "\t" + rightS
 	}
 	if selected {
