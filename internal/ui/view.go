@@ -419,7 +419,9 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if item.LastUploadTime > 0 && a.width >= 76 {
 		rightParts = append(rightParts, time.UnixMilli(item.LastUploadTime).Format("01-02 15:04"))
 	}
-	if item.Note != "" && a.width >= 108 {
+	// Always try to show the note on the row; the fit-check below drops it
+	// (and the other right-side metadata) if the filename would get too cramped.
+	if item.Note != "" {
 		rightParts = append(rightParts, item.Note)
 	}
 	rightPlain := strings.Join(rightParts, "  ")
@@ -430,25 +432,25 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	if !compact {
 		idxStr = fmt.Sprintf("%d", idx)
 	}
-	statusW := 12
+	statusW := 10
 	if compact {
 		statusW = 0
 	}
 	prefixW := 5 // focus marker, status icon, and spacing
 	if !compact {
-		prefixW = 9 // adds the index column
+		prefixW = 8 // adds the index column
 	}
 	rightW := lipgloss.Width(rightPlain)
 	nameW := a.width - prefixW - statusW - rightW - 5
-	if nameW > 42 {
-		nameW = 42
+	if nameW > 36 {
+		nameW = 36
 	}
-	if nameW < 4 {
+	if nameW < 8 {
 		rightPlain = ""
 		rightW = 0
 		nameW = a.width - prefixW - statusW - 5
 	}
-	if nameW < 4 && statusW > 0 {
+	if nameW < 8 && statusW > 0 {
 		statusW = 0
 		nameW = a.width - prefixW - 5
 	}
@@ -462,7 +464,7 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 	// ── Styled ──
 	idxS := ""
 	if !compact {
-		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(3).Align(lipgloss.Right).Render(idxStr)
+		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(2).Align(lipgloss.Right).Render(idxStr)
 	}
 
 	nameS := name
