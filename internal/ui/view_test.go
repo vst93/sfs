@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -333,5 +334,91 @@ func TestCompactLayoutKeepsVerticalBreathingRoom(t *testing.T) {
 	}
 	if !strings.Contains(plain, strings.Repeat("-", a.width-2)) {
 		t.Fatalf("compact list is missing the status/list divider: %q", plain)
+	}
+}
+
+func TestCompactListPreviewsNoteAndKeepsNoteShortcut(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	i18n.SetLocale(i18n.Zh)
+	a := &App{
+		width:          36,
+		height:         16,
+		state:          viewFileList,
+		fileList:       []model.FileRecord{{ID: "1", FileName: "settings.json", Note: "团队共享的编辑器配置，包含较长的备注内容"}},
+		localDirMap:    map[string]string{},
+		localStateMap:  map[string]model.FileState{},
+		probeCache:     map[string]localProbe{},
+		fileStateCache: map[string]model.FileStatus{},
+	}
+	lines := strings.Split(ansi.Strip(a.View()), "\n")
+	if len(lines) > a.height {
+		t.Fatalf("compact note preview rendered %d lines, terminal height=%d", len(lines), a.height)
+	}
+	foundPreview := false
+	for _, line := range lines {
+		if strings.Contains(line, "备注:") {
+			foundPreview = true
+		}
+		if lipgloss.Width(line) > a.width {
+			t.Fatalf("note preview exceeds terminal width: %q", line)
+		}
+	}
+	if !foundPreview {
+		t.Fatalf("compact list does not preview the selected note: %q", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[len(lines)-1], "n 备注") {
+		t.Fatalf("compact bottom bar does not expose the note shortcut: %q", lines[len(lines)-1])
+	}
+}
+
+func TestCompactNoteViewShowsNoteBeforeMetadata(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	i18n.SetLocale(i18n.Zh)
+	a := &App{
+		width:          36,
+		height:         20,
+		state:          viewNote,
+		fileList:       []model.FileRecord{{ID: "1", FileName: "settings.json", Note: "优先展示这条备注"}},
+		localDirMap:    map[string]string{"1": "/tmp"},
+		localStateMap:  map[string]model.FileState{},
+		probeCache:     map[string]localProbe{},
+		fileStateCache: map[string]model.FileStatus{},
+	}
+	plain := ansi.Strip(a.View())
+	noteAt := strings.Index(plain, "优先展示这条备注")
+	pathAt := strings.Index(plain, i18n.T("note.path"))
+	if noteAt < 0 || pathAt < 0 || noteAt > pathAt {
+		t.Fatalf("compact note is not shown before metadata: %q", plain)
+	}
+}
+
+func TestCompactNotePreviewPreservesPaginationAndBottomBar(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	i18n.SetLocale(i18n.En)
+	t.Cleanup(func() { i18n.SetLocale(i18n.Zh) })
+
+	files := make([]model.FileRecord, 30)
+	for i := range files {
+		files[i] = model.FileRecord{ID: fmt.Sprintf("%d", i), FileName: fmt.Sprintf("file-%02d.txt", i), Note: "note preview"}
+	}
+	a := &App{
+		width:          36,
+		height:         16,
+		state:          viewFileList,
+		fileList:       files,
+		localDirMap:    map[string]string{},
+		localStateMap:  map[string]model.FileState{},
+		probeCache:     map[string]localProbe{},
+		fileStateCache: map[string]model.FileStatus{},
+	}
+	lines := strings.Split(ansi.Strip(a.View()), "\n")
+	if got := len(lines); got != a.height {
+		t.Fatalf("compact paginated note view height = %d, want %d", got, a.height)
+	}
+	if !strings.Contains(strings.Join(lines[:len(lines)-1], "\n"), "Page ") {
+		t.Fatalf("page indicator was clipped: %q", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[len(lines)-1], "n Note") {
+		t.Fatalf("bottom bar was clipped: %q", lines[len(lines)-1])
 	}
 }

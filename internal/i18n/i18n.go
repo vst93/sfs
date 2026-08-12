@@ -181,6 +181,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.download":             "d 下载",
 		"bottom.delete":               "x 删除",
 		"bottom.dir":                  "e 编辑",
+		"bottom.note":                 "n 备注",
 		"bottom.add":                  "a 添加",
 		"bottom.settings":             "s 设置",
 		"bottom.sync_all":             "y 全同步",
@@ -354,6 +355,7 @@ var translations = map[Locale]map[string]string{
 
 		// ── Note view ────────────────────────────────────────────────────────
 		"note.status":     "状态",
+		"note.label":      "备注",
 		"note.size":       "大小",
 		"note.uploaded":   "上次上传",
 		"note.user":       "上传者",
@@ -503,6 +505,7 @@ var translations = map[Locale]map[string]string{
 		"bottom.download":             "d Download",
 		"bottom.delete":               "x Delete",
 		"bottom.dir":                  "e Edit",
+		"bottom.note":                 "n Note",
 		"bottom.add":                  "a Add",
 		"bottom.settings":             "s Settings",
 		"bottom.sync_all":             "y Sync all",
@@ -676,6 +679,7 @@ var translations = map[Locale]map[string]string{
 
 		// ── Note view ────────────────────────────────────────────────────────
 		"note.status":     "Status",
+		"note.label":      "Note",
 		"note.size":       "Size",
 		"note.uploaded":   "Last Upload",
 		"note.user":       "User",

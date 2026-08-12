@@ -212,7 +212,9 @@ func (a *App) renderBottomBar() string {
 		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.upload"), i18n.T("bottom.download"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.sync_all"), i18n.T("bottom.update"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
 		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.sync_all"), i18n.T("bottom.update"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
 		{i18n.T("bottom.navigate"), i18n.T("bottom.action"), i18n.T("bottom.add"), i18n.T("bottom.settings"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
-		{i18n.T("bottom.action"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.action"), i18n.T("bottom.note"), i18n.T("bottom.help"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.action"), i18n.T("bottom.note"), i18n.T("bottom.quit")},
+		{i18n.T("bottom.action"), i18n.T("bottom.quit")},
 	}
 	left := renderShortcutSet(tiers[len(tiers)-1])
 	for _, tier := range tiers {
@@ -302,6 +304,9 @@ func (a *App) computeVisibleRows() int {
 	used := 6 // title rail, separator, selected-row detail, and bottom bar
 	if !a.compact() {
 		used++ // column header
+	}
+	if a.compact() && a.selectedItemHasNote() {
+		used++ // selected-row note preview
 	}
 	if a.toast != "" {
 		used++
@@ -421,6 +426,10 @@ func (a *App) renderFileList() string {
 		if selected {
 			b.WriteString(a.detailLine(item, state))
 			b.WriteString("\n")
+			if a.compact() && strings.TrimSpace(item.Note) != "" {
+				b.WriteString(a.notePreviewLine(item.Note))
+				b.WriteString("\n")
+			}
 		}
 	}
 
@@ -435,6 +444,16 @@ func (a *App) renderFileList() string {
 	}
 
 	return b.String()
+}
+
+func (a *App) selectedItemHasNote() bool {
+	return a.cursor >= 0 && a.cursor < len(a.fileList) && strings.TrimSpace(a.fileList[a.cursor].Note) != ""
+}
+
+func (a *App) notePreviewLine(note string) string {
+	label := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(i18n.T("note.label") + ": ")
+	available := max(1, a.width-5-lipgloss.Width(i18n.T("note.label")+": "))
+	return "     " + label + styleMuted.Render(truncateText(strings.TrimSpace(note), available))
 }
 
 func (a *App) clampPage() {
@@ -872,6 +891,17 @@ func (a *App) renderNoteView() string {
 
 	// ── Title ──
 	b.WriteString(a.viewHeader("[NOTE] " + item.FileName))
+	if a.compact() {
+		b.WriteString("\n  " + styleStrong.Render(i18n.T("note.label")) + "\n")
+		note := strings.TrimSpace(item.Note)
+		if note == "" {
+			note = i18n.T("note.empty")
+		}
+		for _, line := range wrapText(note, max(1, a.width-4)) {
+			b.WriteString("  " + line + "\n")
+		}
+		b.WriteString("\n" + separator(a.contentWidth()) + "\n")
+	}
 
 	// ── Status line ──
 	statusParts := []string{
@@ -906,14 +936,16 @@ func (a *App) renderNoteView() string {
 	b.WriteString("\n\n")
 
 	// ── Note ──
-	note := item.Note
-	if note == "" {
-		note = i18n.T("note.empty")
-	}
-	b.WriteString(separator(a.contentWidth()))
-	b.WriteString("\n")
-	for _, line := range wrapText(note, max(1, a.width-4)) {
-		b.WriteString("  " + line + "\n")
+	if !a.compact() {
+		note := item.Note
+		if note == "" {
+			note = i18n.T("note.empty")
+		}
+		b.WriteString(separator(a.contentWidth()))
+		b.WriteString("\n")
+		for _, line := range wrapText(note, max(1, a.width-4)) {
+			b.WriteString("  " + line + "\n")
+		}
 	}
 	b.WriteString(a.viewFooter(i18n.T("note.hint_close")))
 
