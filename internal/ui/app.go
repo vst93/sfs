@@ -123,6 +123,7 @@ type App struct {
 	// Update check
 	updateResult             *update.CheckResult
 	updateDone               bool // whether the async check has completed
+	updateChecking           bool
 	updating                 bool
 	stagedUpdate             *update.PreparedUpdate
 	updateProgressDownloaded atomic.Int64
@@ -192,6 +193,7 @@ type periodicRefreshMsg struct{}
 
 type checkUpdateDoneMsg struct {
 	result update.CheckResult
+	manual bool
 }
 
 // NewApp creates the main application model.
@@ -284,18 +286,20 @@ func NewApp() (*App, error) {
 
 // Init initializes the Bubble Tea program.
 func (a *App) Init() tea.Cmd {
+	a.updateChecking = true
 	return tea.Batch(
 		a.loadFileList(),
+		a.checkForUpdate(false),
 		a.startAutoSyncTicker(),
 		a.startPeriodicRefresh(),
 	)
 }
 
 // checkForUpdate asynchronously checks for a new release.
-func (a *App) checkForUpdate() tea.Cmd {
+func (a *App) checkForUpdate(manual bool) tea.Cmd {
 	return func() tea.Msg {
 		result := update.CheckLatestRelease(model.AppVersion)
-		return checkUpdateDoneMsg{result: result}
+		return checkUpdateDoneMsg{result: result, manual: manual}
 	}
 }
 
@@ -500,23 +504,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.fileStateCache = make(map[string]model.FileStatus)
 		a.probeCache = make(map[string]localProbe)
 		a.moveCursor(a.cursor)
-		// After file list loaded, check for update in the background
-		if !a.updateDone {
-			return a, a.checkForUpdate()
-		}
 		return a, nil
 
 	case checkUpdateDoneMsg:
+		a.updateChecking = false
 		a.updateDone = true
 		a.updateResult = &msg.result
 		if msg.result.Error != nil {
-			return a, a.showToast(fmt.Sprintf(i18n.T("update.check_failed")+": %s", msg.result.Error.Error()), "warning")
+			if msg.manual {
+				return a, a.showToast(fmt.Sprintf(i18n.T("update.check_failed")+": %s", msg.result.Error.Error()), "warning")
+			}
+			return a, nil
 		}
 		if msg.result.HasUpdate {
 			if msg.result.IsBrew {
 				return a, a.showToast(fmt.Sprintf(i18n.T("update.brew_hint"), model.AppVersion, msg.result.LatestVersion), "warning")
 			}
 			return a, a.showToast(fmt.Sprintf(i18n.T("update.available"), msg.result.LatestVersion, model.AppVersion), "warning")
+		}
+		if msg.manual {
+			return a, a.showToast(fmt.Sprintf(i18n.T("update.current_latest"), model.AppVersion), "success")
 		}
 		return a, nil
 
@@ -2331,12 +2338,16 @@ type updateCompleteMsg struct {
 
 // handleUpdate initiates the self-update process.
 func (a *App) handleUpdate() (tea.Model, tea.Cmd) {
-	if a.updateResult == nil {
-		// Check hasn't finished yet
-		return a, a.showToast(i18n.T("update.check_failed"), "warning")
+	if a.updateChecking {
+		return a, a.showToast(i18n.T("update.checking"), "success")
 	}
-	if a.updateResult.Error != nil {
-		return a, a.showToast(i18n.T("update.check_failed"), "error")
+	if a.updateResult == nil || a.updateResult.Error != nil {
+		a.updateChecking = true
+		a.updateDone = false
+		return a, tea.Batch(
+			a.showToast(i18n.T("update.checking"), "success"),
+			a.checkForUpdate(true),
+		)
 	}
 	if !a.updateResult.HasUpdate {
 		return a, a.showToast(fmt.Sprintf(i18n.T("update.current_latest"), model.AppVersion), "success")

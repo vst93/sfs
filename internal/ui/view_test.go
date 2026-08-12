@@ -50,6 +50,68 @@ func TestFileLineFitsTerminal(t *testing.T) {
 	}
 }
 
+func TestFileListMetadataColumnsAlign(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	i18n.SetLocale(i18n.En)
+	t.Cleanup(func() { i18n.SetLocale(i18n.Zh) })
+
+	app := &App{width: 110, fileList: make([]model.FileRecord, 120)}
+	stamp := int64(1700000000000)
+	state := model.FileStatus{Key: "matched"}
+	short := ansi.Strip(app.fileLine(1, model.FileRecord{FileName: "a.txt", Size: 12, LastUploadTime: stamp, Note: "short"}, state, false))
+	long := ansi.Strip(app.fileLine(120, model.FileRecord{FileName: "a-very-long-file-name-that-needs-truncation.json", Size: 2048, LastUploadTime: stamp, Note: "long"}, state, false))
+	header := ansi.Strip(app.fileListHeader())
+	updated := time.UnixMilli(stamp).Format("01-02 15:04")
+
+	for _, text := range []string{"Synced", updated} {
+		shortCol := displayColumnBefore(t, short, text)
+		longCol := displayColumnBefore(t, long, text)
+		if shortCol != longCol {
+			t.Errorf("%q column differs: short=%d long=%d\nshort: %q\nlong:  %q", text, shortCol, longCol, short, long)
+		}
+	}
+	if got, want := displayColumnBefore(t, header, "Status"), displayColumnBefore(t, short, "Synced"); got != want {
+		t.Errorf("status header column = %d, row column = %d", got, want)
+	}
+	if got, want := displayColumnBefore(t, header, "Updated"), displayColumnBefore(t, short, updated); got != want {
+		t.Errorf("updated header column = %d, row column = %d", got, want)
+	}
+}
+
+func TestFileListColumnsFitSupportedDesktopWidths(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	for _, locale := range []i18n.Locale{i18n.Zh, i18n.En} {
+		i18n.SetLocale(locale)
+		for _, width := range []int{62, 72, 91, 92, 110, 140} {
+			app := &App{width: width, fileList: make([]model.FileRecord, 1000)}
+			item := model.FileRecord{
+				FileName:       "配置文件-with-a-very-long-filename.json",
+				Size:           128 * 1024,
+				LastUploadTime: 1700000000000,
+				Note:           "shared editor configuration",
+			}
+			for _, line := range []string{
+				app.fileListHeader(),
+				app.fileLine(1000, item, model.FileStatus{Key: "initial_upload"}, false),
+			} {
+				if got := lipgloss.Width(line); got > width {
+					t.Errorf("locale=%s width=%d rendered=%d: %q", locale, width, got, ansi.Strip(line))
+				}
+			}
+		}
+	}
+	i18n.SetLocale(i18n.Zh)
+}
+
+func displayColumnBefore(t *testing.T, line, text string) int {
+	t.Helper()
+	idx := strings.Index(line, text)
+	if idx < 0 {
+		t.Fatalf("%q not found in %q", text, line)
+	}
+	return lipgloss.Width(line[:idx])
+}
+
 func TestSelectedFileLineUsesPortableFocusStyleAndForeground(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	app := &App{width: 80}

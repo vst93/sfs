@@ -156,6 +156,11 @@ var translations = map[Locale]map[string]string{
 		"file_list.auto_sync_on":        "自动同步",
 		"file_list.syncing":             "⟳ 同步中...",
 		"file_list.last_sync":           "上次同步",
+		"file_list.header_file":         "文件",
+		"file_list.header_status":       "状态",
+		"file_list.header_size":         "大小",
+		"file_list.header_updated":      "更新时间",
+		"file_list.header_note":         "备注",
 
 		// ── Empty state ─────────────────────────────────────────────────────
 		"empty.no_storage": "  尚未配置存储服务",
@@ -418,6 +423,7 @@ var translations = map[Locale]map[string]string{
 		"update.sudo_missing":          "安装目录需要管理员权限，但系统中未找到 sudo",
 		"update.elevation_unsupported": "当前系统无法自动请求管理员权限，请使用安装脚本手动更新",
 		"update.check_failed":          "检查更新失败",
+		"update.checking":              "正在检查更新...",
 		"update.current_latest":        "已是最新版本 (%s)",
 		"update.U":                     "U 更新",
 	},
@@ -472,6 +478,11 @@ var translations = map[Locale]map[string]string{
 		"file_list.auto_sync_on":        "Auto sync",
 		"file_list.syncing":             "⟳ Syncing...",
 		"file_list.last_sync":           "Last sync",
+		"file_list.header_file":         "File",
+		"file_list.header_status":       "Status",
+		"file_list.header_size":         "Size",
+		"file_list.header_updated":      "Updated",
+		"file_list.header_note":         "Note",
 
 		// ── Empty state ─────────────────────────────────────────────────────
 		"empty.no_storage": "  Storage not configured",
@@ -734,6 +745,7 @@ var translations = map[Locale]map[string]string{
 		"update.sudo_missing":          "The install directory requires administrator access, but sudo was not found",
 		"update.elevation_unsupported": "Administrator access cannot be requested automatically on this system; update with the install script",
 		"update.check_failed":          "Failed to check for updates",
+		"update.checking":              "Checking for updates...",
 		"update.current_latest":        "Already on the latest version (%s)",
 		"update.U":                     "U Update",
 	},

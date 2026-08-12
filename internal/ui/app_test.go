@@ -4,10 +4,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"smallFileSync/internal/i18n"
 	"smallFileSync/internal/model"
+	"smallFileSync/internal/update"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -65,6 +68,35 @@ func TestFileListRefreshKeepsListOnRemoteError(t *testing.T) {
 	}
 	if app.localDirMap["current"] != "/new" {
 		t.Fatalf("local mapping was not refreshed: %#v", app.localDirMap)
+	}
+}
+
+func TestBackgroundUpdateFailureIsSilent(t *testing.T) {
+	app := &App{updateChecking: true}
+	_, cmd := app.Update(checkUpdateDoneMsg{
+		result: update.CheckResult{Error: errors.New("offline")},
+		manual: false,
+	})
+	if cmd != nil {
+		t.Fatal("background update failure returned a toast command")
+	}
+	if app.updateChecking || !app.updateDone {
+		t.Fatalf("unexpected update state: checking=%v done=%v", app.updateChecking, app.updateDone)
+	}
+}
+
+func TestManualUpdateFailureIsReported(t *testing.T) {
+	app := &App{updateChecking: true}
+	_, cmd := app.Update(checkUpdateDoneMsg{
+		result: update.CheckResult{Error: errors.New("offline")},
+		manual: true,
+	})
+	if cmd == nil {
+		t.Fatal("manual update failure did not return a toast command")
+	}
+	msg, ok := cmd().(toastMsg)
+	if !ok || !strings.Contains(msg.text, i18n.T("update.check_failed")) {
+		t.Fatalf("manual update failure returned %#v", msg)
 	}
 }
 

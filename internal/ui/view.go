@@ -300,6 +300,9 @@ func (a *App) renderAutoSyncCountdown() string {
 
 func (a *App) computeVisibleRows() int {
 	used := 6 // title rail, separator, selected-row detail, and bottom bar
+	if !a.compact() {
+		used++ // column header
+	}
 	if a.toast != "" {
 		used++
 	}
@@ -403,6 +406,10 @@ func (a *App) renderFileList() string {
 	b.WriteString("\n")
 	b.WriteString(" " + separator(max(2, a.width-2)))
 	b.WriteString("\n")
+	if !a.compact() {
+		b.WriteString(a.fileListHeader())
+		b.WriteString("\n")
+	}
 
 	// ── List rows ──
 	for i := start; i < end; i++ {
@@ -470,129 +477,97 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 		stText, stColor, stIcon = "", colorMuted, " "
 	}
 
-	// ── Right metadata progressively collapses on narrow terminals. ──
-	// Each group gets its own color so size / time / note read as distinct
-	// instead of blending together. rightPlain is used for width math;
-	// rightMeta holds the individually-styled rendering.
-	rightParts := []string{}
-	rightStyled := []string{}
-	if item.Size > 0 && a.width >= 58 {
-		s := formatKB(item.Size)
-		rightParts = append(rightParts, s)
-		rightStyled = append(rightStyled, styleMuted.Render(s))
-	}
-	if item.LastUploadTime > 0 && a.width >= 76 {
-		s := time.UnixMilli(item.LastUploadTime).Format("01-02 15:04")
-		rightParts = append(rightParts, s)
-		rightStyled = append(rightStyled, styleDim.Render(s))
-	}
-	// Always try to show the note on the row; the fit-check below drops it
-	// (and the other right-side metadata) if the filename would get too cramped.
-	if item.Note != "" {
-		rightParts = append(rightParts, "› "+item.Note)
-		rightStyled = append(rightStyled, styleMuted.Render("› "+item.Note))
-	}
-	rightPlain := strings.Join(rightParts, " · ")
-	rightMeta := strings.Join(rightStyled, " · ")
-
-	// ── Layout calc ──
-	compact := a.compact()
-	if compact {
-		rightPlain = ""
-		rightMeta = ""
-	}
-	idxStr := ""
-	if !compact {
-		idxStr = fmt.Sprintf("%d", idx)
-	}
-	statusW := 0
-	if !compact {
-		statusW = lipgloss.Width(stText)
-	}
-	prefixW := 5 // focus marker, status icon, and spacing
-	if !compact {
-		prefixW = 8 // adds the index column
-	}
-	rightW := lipgloss.Width(rightPlain)
-	const tabWidth = 4
-	spacingW := 0
-	if statusW > 0 || rightW > 0 {
-		spacingW = tabWidth
-	}
-	if statusW > 0 && rightW > 0 {
-		spacingW += tabWidth
-	}
-	nameW := a.width - prefixW - statusW - rightW - spacingW
-	if nameW > 36 {
-		nameW = 36
-	}
-	if nameW < 8 {
-		rightPlain = ""
-		rightMeta = ""
-		rightW = 0
-		spacingW = 0
-		if statusW > 0 {
-			spacingW = tabWidth
-		}
-		nameW = a.width - prefixW - statusW - spacingW
-	}
-	if nameW < 8 && statusW > 0 {
-		statusW = 0
-		spacingW = 0
-		nameW = a.width - prefixW
-	}
-	nameW = max(4, nameW)
-	name := truncateText(item.FileName, nameW)
-
-	// ── Styled ──
-	idxS := ""
-	if !compact {
-		idxS = lipgloss.NewStyle().Foreground(colorMuted).Width(2).Align(lipgloss.Right).Render(idxStr)
-	}
-
-	nameS := name
-	if selected {
-		nameS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(name)
-	}
-
-	rightS := rightMeta
-	if selected {
-		// Selected row: strong primary highlight over the whole metadata.
-		rightS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(rightPlain)
-	}
-
 	cursorS := "  "
 	if selected {
 		cursorS = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("> ")
-	}
-
-	statusText := ""
-	if statusW > 0 {
-		statusText = stText
-	}
-	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(statusW)
-	if selected {
-		statusStyle = statusStyle.Bold(true)
-	}
-	line := cursorS
-	if !compact {
-		line += idxS + " "
 	}
 	iconStyle := lipgloss.NewStyle().Foreground(stColor)
 	if selected {
 		iconStyle = iconStyle.Bold(true)
 	}
-	line += iconStyle.Render(stIcon) + " " + nameS
-	if statusText != "" {
-		line += "\t" + statusStyle.Render(statusText)
+
+	if a.compact() {
+		name := truncateText(item.FileName, max(4, a.width-5))
+		nameStyle := lipgloss.NewStyle()
+		if selected {
+			nameStyle = nameStyle.Bold(true).Foreground(colorPrimary)
+		}
+		return cursorS + iconStyle.Render(stIcon) + " " + nameStyle.Render(name)
 	}
-	if rightPlain != "" {
-		line += "\t" + rightS
-	}
+
+	cols := a.fileListColumns()
+	idxS := lipgloss.NewStyle().Foreground(colorMuted).Width(cols.indexW).Align(lipgloss.Right).Render(fmt.Sprintf("%d", idx))
+	nameStyle := lipgloss.NewStyle().Width(cols.nameW)
+	statusStyle := lipgloss.NewStyle().Foreground(stColor).Width(cols.statusW)
+	metaStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	timeStyle := lipgloss.NewStyle().Foreground(colorDim)
 	if selected {
-		return lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).TabWidth(tabWidth).Render(line)
+		nameStyle = nameStyle.Bold(true).Foreground(colorPrimary)
+		statusStyle = statusStyle.Bold(true).Foreground(colorPrimary)
+		metaStyle = metaStyle.Bold(true).Foreground(colorPrimary)
+		timeStyle = timeStyle.Bold(true).Foreground(colorPrimary)
 	}
-	return lipgloss.NewStyle().TabWidth(tabWidth).Render(line)
+
+	size := "-"
+	if item.Size > 0 {
+		size = formatKB(item.Size)
+	}
+	updated := "-"
+	if item.LastUploadTime > 0 {
+		updated = time.UnixMilli(item.LastUploadTime).Format("01-02 15:04")
+	}
+
+	line := cursorS + idxS + " " + iconStyle.Render(stIcon) + " "
+	line += nameStyle.Render(truncateText(item.FileName, cols.nameW))
+	line += columnGap + statusStyle.Render(truncateText(stText, cols.statusW))
+	line += columnGap + metaStyle.Width(cols.sizeW).Align(lipgloss.Right).Render(truncateText(size, cols.sizeW))
+	line += columnGap + timeStyle.Width(cols.updatedW).Render(updated)
+	if cols.noteW > 0 {
+		line += columnGap + metaStyle.Width(cols.noteW).Render(truncateText(item.Note, cols.noteW))
+	}
+	return line
+}
+
+const columnGap = "  "
+
+type fileListColumnLayout struct {
+	indexW   int
+	nameW    int
+	statusW  int
+	sizeW    int
+	updatedW int
+	noteW    int
+}
+
+func (a *App) fileListColumns() fileListColumnLayout {
+	cols := fileListColumnLayout{
+		indexW:   max(2, lipgloss.Width(fmt.Sprintf("%d", len(a.fileList)))),
+		statusW:  8,
+		sizeW:    8,
+		updatedW: 11,
+	}
+	prefixW := 2 + cols.indexW + 3 // cursor, index gap, icon, and icon gap
+	fixedW := prefixW + cols.statusW + cols.sizeW + cols.updatedW + 3*lipgloss.Width(columnGap)
+	cols.nameW = max(12, min(36, a.width-1-fixedW))
+	if a.width >= 92 {
+		cols.noteW = max(0, a.width-1-fixedW-cols.nameW-lipgloss.Width(columnGap))
+	}
+	return cols
+}
+
+func (a *App) fileListHeader() string {
+	cols := a.fileListColumns()
+	prefixW := 2 + cols.indexW + 3
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorMuted)
+	line := strings.Repeat(" ", prefixW)
+	line += headerStyle.Width(cols.nameW).Render(i18n.T("file_list.header_file"))
+	line += columnGap + headerStyle.Width(cols.statusW).Render(i18n.T("file_list.header_status"))
+	line += columnGap + headerStyle.Width(cols.sizeW).Align(lipgloss.Right).Render(i18n.T("file_list.header_size"))
+	line += columnGap + headerStyle.Width(cols.updatedW).Render(i18n.T("file_list.header_updated"))
+	if cols.noteW > 0 {
+		line += columnGap + headerStyle.Width(cols.noteW).Render(i18n.T("file_list.header_note"))
+	}
+	return line
 }
 
 func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
@@ -616,6 +591,8 @@ func (a *App) detailLine(item model.FileRecord, state model.FileStatus) string {
 	indent := "       "
 	if a.compact() {
 		indent = "     "
+	} else {
+		indent = strings.Repeat(" ", 2+a.fileListColumns().indexW+3)
 	}
 	line := truncateText(indent+strings.Join(parts, " · "), max(1, a.width-1))
 	// Pass selected flag from call site — we always show detail only for the selected row,
