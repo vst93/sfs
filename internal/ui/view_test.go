@@ -67,6 +67,48 @@ func TestSelectedFileLineUsesPortableFocusStyleAndForeground(t *testing.T) {
 	}
 }
 
+func TestAdaptiveForegroundsSupportLightAndDarkTerminals(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	lipgloss.SetHasDarkBackground(false)
+	lightMuted := styleMuted.Render("muted")
+	wantLightMuted := lipgloss.NewStyle().Foreground(lipgloss.Color("#58677A")).Render("muted")
+	if lightMuted != wantLightMuted {
+		t.Fatalf("light terminal muted color = %q, want %q", lightMuted, wantLightMuted)
+	}
+	lightSelected := (&App{width: 40}).fileLine(1, model.FileRecord{FileName: "settings.json"}, model.FileStatus{Key: "matched"}, true)
+	wantLightAccent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0F766E")).Render("selected")
+	if !strings.Contains(lightSelected, strings.SplitN(wantLightAccent, "selected", 2)[0]) {
+		t.Fatalf("light terminal selected row does not use the light accent: %q", lightSelected)
+	}
+
+	lipgloss.SetHasDarkBackground(true)
+	darkMuted := styleMuted.Render("muted")
+	wantDarkMuted := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8")).Render("muted")
+	if darkMuted != wantDarkMuted {
+		t.Fatalf("dark terminal muted color = %q, want %q", darkMuted, wantDarkMuted)
+	}
+	darkSelected := (&App{width: 40}).fileLine(1, model.FileRecord{FileName: "settings.json"}, model.FileStatus{Key: "matched"}, true)
+	wantDarkAccent := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#2DD4BF")).Render("selected")
+	if !strings.Contains(darkSelected, strings.SplitN(wantDarkAccent, "selected", 2)[0]) {
+		t.Fatalf("dark terminal selected row does not use the dark accent: %q", darkSelected)
+	}
+}
+
+func TestStrongTextInheritsTerminalForeground(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	for _, dark := range []bool{false, true} {
+		lipgloss.SetHasDarkBackground(dark)
+		got := styleStrong.Render("SFS")
+		if strings.Contains(got, "\x1b[38;") {
+			t.Fatalf("strong text sets an explicit foreground (dark=%v): %q", dark, got)
+		}
+		if ansi.Strip(got) != "SFS" {
+			t.Fatalf("strong text content = %q, want SFS", ansi.Strip(got))
+		}
+	}
+}
+
 func TestBottomBarFitsChineseAndEnglish(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.Ascii)
 	locales := []i18n.Locale{i18n.Zh, i18n.En}
@@ -97,10 +139,10 @@ func TestViewsFitNarrowTerminal(t *testing.T) {
 		m.SetValue(v)
 		return m
 	}
-	newApp := func(width int) *App {
+	newApp := func(width, height int) *App {
 		a := &App{
 			width:          width,
-			height:         26,
+			height:         height,
 			state:          viewFileList,
 			fileList:       fileList,
 			localDirMap:    map[string]string{},
@@ -149,22 +191,85 @@ func TestViewsFitNarrowTerminal(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		for _, width := range []int{36, 48, 72, 100} {
+		for _, size := range []struct{ width, height int }{{36, 16}, {40, 20}, {48, 26}, {72, 26}, {100, 32}} {
 			for _, locale := range []i18n.Locale{i18n.Zh, i18n.En} {
 				i18n.SetLocale(locale)
-				a := newApp(width)
+				a := newApp(size.width, size.height)
 				a.state = tc.state
 				if tc.setup != nil {
 					tc.setup(a)
 				}
 				out := a.View()
-				for n, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-					if got := lipgloss.Width(line); got > width {
-						t.Errorf("%s (locale=%s, width=%d) line %d width=%d: %q", tc.name, locale, width, n, got, ansi.Strip(line))
+				lines := strings.Split(out, "\n")
+				if len(lines) > size.height {
+					t.Errorf("%s (locale=%s, size=%dx%d) rendered %d lines", tc.name, locale, size.width, size.height, len(lines))
+				}
+				for n, line := range lines {
+					if got := lipgloss.Width(line); got > size.width {
+						t.Errorf("%s (locale=%s, size=%dx%d) line %d width=%d: %q", tc.name, locale, size.width, size.height, n, got, ansi.Strip(line))
 					}
 				}
 			}
 		}
 	}
 	i18n.SetLocale(i18n.Zh)
+}
+
+func TestSecondaryViewScrollKeepsBottomBarVisible(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	a := &App{width: 36, height: 12, state: viewHelp}
+	before := a.View()
+	a.handleHelpKey(tea.KeyMsg{Type: tea.KeyDown})
+	after := a.View()
+	if before == after {
+		t.Fatal("help view did not move after scrolling")
+	}
+	if got := len(strings.Split(after, "\n")); got != a.height {
+		t.Fatalf("scrolled view height = %d, want %d", got, a.height)
+	}
+	last := strings.Split(after, "\n")[a.height-1]
+	if !strings.Contains(ansi.Strip(last), "Esc") {
+		t.Fatalf("bottom bar was not kept visible after scrolling: %q", ansi.Strip(last))
+	}
+}
+
+func TestCompactLayoutKeepsVerticalBreathingRoom(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	input := func(value string) textinput.Model {
+		m := textinput.New()
+		m.SetValue(value)
+		return m
+	}
+	a := &App{
+		width:          40,
+		height:         20,
+		state:          viewSettings,
+		settingsInputs: []textinput.Model{input("endpoint"), input("user"), input("password"), input("path")},
+	}
+	plain := ansi.Strip(a.View())
+	lines := strings.Split(plain, "\n")
+	endpointLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "endpoint") {
+			endpointLine = i
+			break
+		}
+	}
+	if endpointLine < 0 || endpointLine+1 >= len(lines) || strings.TrimSpace(lines[endpointLine+1]) != "" {
+		t.Fatalf("compact fields are missing a blank separator line: %q", plain)
+	}
+
+	a.state = viewFileList
+	a.fileList = []model.FileRecord{{ID: "1", FileName: "settings.json"}}
+	a.localDirMap = map[string]string{}
+	a.localStateMap = map[string]model.FileState{}
+	a.probeCache = map[string]localProbe{}
+	a.fileStateCache = map[string]model.FileStatus{}
+	plain = ansi.Strip(a.View())
+	if !strings.Contains(plain, "v"+model.AppVersion+"\n\n") {
+		t.Fatalf("compact list header is missing breathing room: %q", plain)
+	}
+	if !strings.Contains(plain, strings.Repeat("-", a.width-2)) {
+		t.Fatalf("compact list is missing the status/list divider: %q", plain)
+	}
 }

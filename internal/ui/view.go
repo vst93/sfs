@@ -38,24 +38,61 @@ func (a *App) View() string {
 	case viewExportConfig:
 		body.WriteString(a.renderExportConfigView())
 	}
-	if a.toast != "" {
-		body.WriteString("\n")
-		a.renderToast(&body)
-	}
-
 	bodyStr := body.String()
 	bodyStr = strings.TrimRight(bodyStr, "\n")
-	bodyLines := 0
-	if bodyStr != "" {
-		bodyLines = strings.Count(bodyStr, "\n") + 1
+
+	toastStr := ""
+	if a.toast != "" {
+		var toast strings.Builder
+		a.renderToast(&toast)
+		toastStr = toast.String()
 	}
-	available := a.height - 1 // 1 line for bottom bar
-	padding := available - bodyLines
+
+	available := max(0, a.height-1) // reserve the last line for shortcuts
+	bodyAvailable := available
+	if toastStr != "" && bodyAvailable > 0 {
+		bodyAvailable--
+	}
+	bodyStr = a.fitBodyToViewport(bodyStr, bodyAvailable)
+	bodyLines := lineCount(bodyStr)
+	padding := bodyAvailable - bodyLines
 	if padding > 0 {
 		bodyStr += strings.Repeat("\n", padding)
 	}
 
-	return bodyStr + "\n" + a.renderBottomBar()
+	parts := make([]string, 0, 3)
+	if bodyAvailable > 0 {
+		parts = append(parts, bodyStr)
+	}
+	if toastStr != "" && available > 0 {
+		parts = append(parts, toastStr)
+	}
+	parts = append(parts, a.renderBottomBar())
+	return strings.Join(parts, "\n")
+}
+
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+func (a *App) fitBodyToViewport(body string, height int) string {
+	if body == "" || height <= 0 {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	if len(lines) <= height {
+		a.scrollOffset = 0
+		return body
+	}
+	start := 0
+	if a.state != viewFileList {
+		start = min(a.scrollOffset, len(lines)-height)
+		a.scrollOffset = start
+	}
+	return strings.Join(lines[start:start+height], "\n")
 }
 
 // ── Shared layout helpers ───────────────────────────────────────────────────
@@ -72,7 +109,7 @@ func (a *App) contentWidth() int {
 
 func (a *App) viewHeader(title string) string {
 	title = truncateText(strings.TrimSpace(title), max(1, a.contentWidth()-2))
-	left := "  " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(title)
+	left := "  " + styleStrong.Render(title)
 	if a.compact() {
 		return left + "\n" + separator(a.contentWidth()) + "\n"
 	}
@@ -82,6 +119,9 @@ func (a *App) viewHeader(title string) string {
 }
 
 func (a *App) viewFooter(hint string) string {
+	if a.compact() {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString("\n" + separator(a.contentWidth()) + "\n")
 	for _, line := range wrapText(hint, max(1, a.contentWidth()-2)) {
@@ -91,10 +131,23 @@ func (a *App) viewFooter(hint string) string {
 }
 
 func (a *App) inputWidth(labelW int) int {
-	return max(8, min(64, a.width-8-labelW-2))
+	if a.compact() {
+		// textinput adds its prompt and cursor around Width.
+		return max(4, a.width-7)
+	}
+	return max(6, min(64, a.width-8-labelW-2))
 }
 
 func (a *App) fieldLine(label string, input textinput.Model, focused bool, labelW int) string {
+	if a.compact() {
+		marker := "  "
+		labelStyle := styleMuted
+		if focused {
+			marker = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("> ")
+			labelStyle = styleStrong
+		}
+		return "  " + marker + labelStyle.Render(label) + "\n    " + input.View()
+	}
 	labelS := lipgloss.NewStyle().Foreground(colorMuted).Width(labelW).Render(label)
 	if focused {
 		return "  " + lipgloss.NewStyle().Foreground(colorPrimary).Render("> ") + labelS + ": " + input.View()
@@ -194,7 +247,9 @@ func (a *App) contextShortcuts() []string {
 	case viewConfirm:
 		return []string{"Tab " + i18n.T("common.select"), "Enter " + i18n.T("common.confirm"), "Esc " + i18n.T("common.cancel")}
 	case viewExportConfig:
-		return []string{"Esc " + i18n.T("common.close")}
+		return []string{i18n.T("bottom.navigate"), "Esc " + i18n.T("common.close")}
+	case viewHelp, viewNote, viewSyncResult:
+		return []string{i18n.T("bottom.navigate"), "Esc " + i18n.T("common.back")}
 	default:
 		return []string{"Esc " + i18n.T("common.back")}
 	}
@@ -244,16 +299,16 @@ func (a *App) renderAutoSyncCountdown() string {
 // ── File list ───────────────────────────────────────────────────────────────
 
 func (a *App) computeVisibleRows() int {
-	used := 5 // header, selected-row detail, and bottom bar
+	used := 6 // title rail, separator, selected-row detail, and bottom bar
 	if a.toast != "" {
 		used++
 	}
 	n := a.height - used
 	if len(a.fileList) > n {
-		n -= 2 // page indicator and breathing room
+		n-- // page indicator
 	}
-	if n < 2 {
-		n = 2
+	if n < 1 {
+		n = 1
 	}
 	return n
 }
@@ -275,7 +330,7 @@ func (a *App) renderFileList() string {
 
 	// ── Top header and status rail ──
 	_, matched, pending, unbound := a.countStats()
-	title := " " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("SFS")
+	title := " " + styleStrong.Render("SFS")
 	if !a.compact() {
 		title += styleMuted.Render("  SMALL FILE SYNC")
 	}
@@ -289,14 +344,30 @@ func (a *App) renderFileList() string {
 	chipStyleWarning := lipgloss.NewStyle().Bold(true).Foreground(colorWarning)
 
 	// Left: file stats
-	leftParts := []string{}
-	leftParts = append(leftParts, lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render(fmt.Sprintf(i18n.T("file_list.files_count"), total)))
-	leftParts = append(leftParts, chipStyleSuccess.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.matched_short"), matched)))
-	leftParts = append(leftParts, chipStyleWarning.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.pending_short"), pending)))
-	if unbound > 0 {
-		leftParts = append(leftParts, chipStyle.Render("● "+fmt.Sprintf(i18n.T("file_list.stats.unbound_short"), unbound)))
+	type statPart struct {
+		text  string
+		style lipgloss.Style
 	}
-	left := strings.Join(leftParts, "  ")
+	stats := []statPart{
+		{fmt.Sprintf(i18n.T("file_list.files_count"), total), styleStrong},
+		{"● " + fmt.Sprintf(i18n.T("file_list.stats.matched_short"), matched), chipStyleSuccess},
+		{"● " + fmt.Sprintf(i18n.T("file_list.stats.pending_short"), pending), chipStyleWarning},
+	}
+	if unbound > 0 && !a.compact() {
+		stats = append(stats, statPart{"● " + fmt.Sprintf(i18n.T("file_list.stats.unbound_short"), unbound), chipStyle})
+	}
+	renderStats := func(parts []statPart) string {
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			out = append(out, part.style.Render(part.text))
+		}
+		return strings.Join(out, "  ")
+	}
+	left := renderStats(stats)
+	for len(stats) > 1 && lipgloss.Width(left) > max(2, a.width-3) {
+		stats = stats[:len(stats)-1]
+		left = renderStats(stats)
+	}
 
 	// Right: auto-sync status
 	right := ""
@@ -324,15 +395,13 @@ func (a *App) renderFileList() string {
 		right = ""
 		rightW = 0
 	}
-	if leftW > max(2, a.width-3) {
-		left = truncateText(left, max(2, a.width-3))
-		leftW = lipgloss.Width(left)
-	}
 	gap := a.width - leftW - rightW - 3
 	if gap < 1 {
 		gap = 1
 	}
 	b.WriteString(" " + left + strings.Repeat(" ", gap) + right + " ")
+	b.WriteString("\n")
+	b.WriteString(" " + separator(max(2, a.width-2)))
 	b.WriteString("\n")
 
 	// ── List rows ──
@@ -355,7 +424,6 @@ func (a *App) renderFileList() string {
 		if a.pageRows > 0 {
 			curPage = a.pageOffset / a.pageRows
 		}
-		b.WriteString("\n")
 		b.WriteString(styleMuted.Render(fmt.Sprintf(i18n.T("file_list.page_indicator"), curPage+1, pages)))
 	}
 
@@ -429,6 +497,10 @@ func (a *App) fileLine(idx int, item model.FileRecord, state model.FileStatus, s
 
 	// ── Layout calc ──
 	compact := a.compact()
+	if compact {
+		rightPlain = ""
+		rightMeta = ""
+	}
 	idxStr := ""
 	if !compact {
 		idxStr = fmt.Sprintf("%d", idx)
@@ -593,7 +665,7 @@ func (a *App) countStats() (total, matched, pending, unbound int) {
 
 func (a *App) renderEmpty() string {
 	var b strings.Builder
-	title := " " + lipgloss.NewStyle().Bold(true).Foreground(colorHighlight).Render("SFS")
+	title := " " + styleStrong.Render("SFS")
 	if a.compact() {
 		title += styleMuted.Render("  v" + model.AppVersion)
 	} else {
@@ -629,9 +701,9 @@ func (a *App) renderAddFile() string {
 	if a.addFileEditMode {
 		// ── Edit mode: directory + note, no path validation ──
 		b.WriteString(a.viewHeader(i18n.T("edit_file.title")))
-		b.WriteString("\n")
+		b.WriteString(responsiveGap(a.compact()))
 		b.WriteString(a.fieldLine(i18n.T("add_file.label.path"), a.addFileInputs[0], a.addFileFocus == 0, labelW))
-		b.WriteString("\n\n")
+		b.WriteString(responsiveGap(a.compact()))
 		b.WriteString(a.fieldLine(i18n.T("add_file.label.note"), a.addFileInputs[1], a.addFileFocus == 1, labelW))
 		if a.addFileFeedback != "" {
 			b.WriteString("\n\n  " + a.addFileFeedback)
@@ -642,18 +714,26 @@ func (a *App) renderAddFile() string {
 
 	// ── Add mode: path + note with validation ──
 	b.WriteString(a.viewHeader(i18n.T("add_file.title")))
-	b.WriteString("\n")
+	b.WriteString(responsiveGap(a.compact()))
 	b.WriteString(a.fieldLine(i18n.T("add_file.label.path"), a.addFileInputs[0], a.addFileFocus == 0, labelW))
 	b.WriteString("\n")
 	if a.addFileStats != nil {
 		validMsg := fmt.Sprintf(i18n.T("add_file.path_valid"), a.addFileStats.Name(), formatBytes(a.addFileStats.Size()))
-		b.WriteString("        " + styleSuccess.Render(truncateText(validMsg, max(1, a.width-10))))
-		b.WriteString("\n\n")
+		indent := "        "
+		if a.compact() {
+			indent = "    "
+		}
+		b.WriteString("\n" + indent + styleSuccess.Render(truncateText(validMsg, max(1, a.width-lipgloss.Width(indent)-2))))
+		b.WriteString(responsiveGap(a.compact()))
 	} else if a.addFilePath != "" {
-		b.WriteString("        " + styleDanger.Render(i18n.T("add_file.path_invalid")))
-		b.WriteString("\n\n")
+		indent := "        "
+		if a.compact() {
+			indent = "    "
+		}
+		b.WriteString("\n" + indent + styleDanger.Render(truncateText(i18n.T("add_file.path_invalid"), max(1, a.width-lipgloss.Width(indent)-2))))
+		b.WriteString(responsiveGap(a.compact()))
 	} else {
-		b.WriteString("\n")
+		b.WriteString(responsiveGap(a.compact()))
 	}
 	b.WriteString(a.fieldLine(i18n.T("add_file.label.note"), a.addFileInputs[1], a.addFileFocus == 1, labelW))
 	if a.addFileFeedback != "" {
@@ -670,7 +750,7 @@ func (a *App) renderSetDir() string {
 	a.setDirInput.Width = a.inputWidth(labelW)
 	var b strings.Builder
 	b.WriteString(a.viewHeader(i18n.T("set_dir.title")))
-	b.WriteString("\n")
+	b.WriteString(responsiveGap(a.compact()))
 	b.WriteString(a.fieldLine(i18n.T("set_dir.label"), a.setDirInput, true, labelW))
 	if a.setDirFeedback != "" {
 		b.WriteString("\n\n  " + a.setDirFeedback)
@@ -697,7 +777,7 @@ func (a *App) renderSettings() string {
 	}
 	var b strings.Builder
 	b.WriteString(a.viewHeader(i18n.T("settings.title")))
-	b.WriteString("\n")
+	b.WriteString(responsiveGap(a.compact()))
 	for i, label := range labels {
 		b.WriteString(a.fieldLine(label, a.settingsInputs[i], a.settingsFocus == i, labelW))
 		if i == 2 && a.settingsFocus == 2 {
@@ -705,18 +785,27 @@ func (a *App) renderSettings() string {
 			if !a.showPassword {
 				passwordHint = styleMuted.Render(i18n.T("settings.password_show"))
 			}
-			b.WriteString("\n          " + passwordHint)
+			indent := "          "
+			if a.compact() {
+				indent = "    "
+			}
+			b.WriteString("\n" + indent + passwordHint)
 		}
-		if i == 3 {
+		if i == 3 && !a.compact() {
 			b.WriteString("\n          " + styleMuted.Render(i18n.T("settings.base_path_default")))
 		}
-		b.WriteString("\n\n")
+		b.WriteString(responsiveGap(a.compact()))
 	}
 	if a.settingsFeedback != "" {
 		b.WriteString("  " + a.settingsFeedback + "\n\n")
 	}
 	b.WriteString(a.viewFooter(i18n.T("settings.hint")))
 	return b.String()
+}
+
+func responsiveGap(compact bool) string {
+	// One empty line keeps form groups readable at every terminal width.
+	return "\n\n"
 }
 
 // ─── Confirm (full-page view) ───────────────────────────────────────────────

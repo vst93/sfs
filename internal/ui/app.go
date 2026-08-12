@@ -57,9 +57,10 @@ type App struct {
 	webdavStore *storage.WebDAVStore
 
 	// File list cursor
-	cursor     int
-	pageOffset int // first visible row index
-	pageRows   int // how many rows fit on screen
+	cursor       int
+	pageOffset   int // first visible row index
+	pageRows     int // how many rows fit on screen
+	scrollOffset int // vertical offset for content-heavy secondary views
 
 	// Add file state
 	addFileInputs   []textinput.Model
@@ -359,7 +360,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.pageRows = max(3, msg.Height-10)
+		a.pageRows = max(1, msg.Height-6)
 		return a, nil
 
 	case tea.MouseMsg:
@@ -660,9 +661,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleExportConfigKey handles keys in the export config view.
 func (a *App) handleExportConfigKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.handleViewScroll(msg) {
+		return a, nil
+	}
 	switch msg.String() {
 	case "esc", "q", "enter":
 		a.state = viewFileList
+		a.scrollOffset = 0
 		return a, func() tea.Msg { return tea.EnableMouseCellMotion() }
 	}
 	return a, nil
@@ -755,6 +760,7 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "s":
 		a.state = viewSettings
+		a.scrollOffset = 0
 		a.settingsFocus = 0
 		a.settingsFeedback = ""
 		a.settingsInputs[0].SetValue(a.settings.Storage.WebDAV.Endpoint)
@@ -853,10 +859,12 @@ func (a *App) handleFileListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		a.state = viewHelp
+		a.scrollOffset = 0
 
 	case "n":
 		if len(a.fileList) > 0 {
 			a.state = viewNote
+			a.scrollOffset = 0
 		}
 	}
 
@@ -1005,19 +1013,27 @@ func (a *App) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.handleViewScroll(msg) {
+		return a, nil
+	}
 	switch msg.String() {
 	case "?", "esc", "q":
 		a.state = viewFileList
+		a.scrollOffset = 0
 		return a, nil
 	}
 	return a, nil
 }
 
 func (a *App) handleSyncResultKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.handleViewScroll(msg) {
+		return a, nil
+	}
 	switch msg.String() {
 	case "esc", "q", "enter":
 		if !a.syncing {
 			a.state = viewFileList
+			a.scrollOffset = 0
 		}
 		return a, nil
 	}
@@ -1025,12 +1041,37 @@ func (a *App) handleSyncResultKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleNoteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.handleViewScroll(msg) {
+		return a, nil
+	}
 	switch msg.String() {
 	case "esc", "q", "n", "enter":
 		a.state = viewFileList
+		a.scrollOffset = 0
 		return a, nil
 	}
 	return a, nil
+}
+
+func (a *App) handleViewScroll(msg tea.KeyMsg) bool {
+	page := max(1, a.height-4)
+	switch msg.String() {
+	case "up", "k":
+		a.scrollOffset = max(0, a.scrollOffset-1)
+	case "down", "j":
+		a.scrollOffset++
+	case "pgup", "left", "h":
+		a.scrollOffset = max(0, a.scrollOffset-page)
+	case "pgdown", "right", "l":
+		a.scrollOffset += page
+	case "g":
+		a.scrollOffset = 0
+	case "G":
+		a.scrollOffset = int(^uint(0) >> 1)
+	default:
+		return false
+	}
+	return true
 }
 
 func (a *App) handleAddFileKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1395,10 +1436,12 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		a.state = viewFileList
+		a.scrollOffset = 0
 		return a, nil
 
 	case "tab", "down":
 		a.settingsFocus = (a.settingsFocus + 1) % len(a.settingsInputs)
+		a.keepSettingsFocusVisible()
 		for i := range a.settingsInputs {
 			if i == a.settingsFocus {
 				a.settingsInputs[i].Focus()
@@ -1410,6 +1453,7 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "up":
 		a.settingsFocus = (a.settingsFocus - 1 + len(a.settingsInputs)) % len(a.settingsInputs)
+		a.keepSettingsFocusVisible()
 		for i := range a.settingsInputs {
 			if i == a.settingsFocus {
 				a.settingsInputs[i].Focus()
@@ -1432,6 +1476,7 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+b":
 		a.buildExportCommand()
 		a.state = viewExportConfig
+		a.scrollOffset = 0
 		return a, tea.Batch(
 			a.showToast(i18n.T("export.copied_hint"), "success"),
 			func() tea.Msg { return tea.DisableMouse() },
@@ -1462,6 +1507,18 @@ func (a *App) handleSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.settingsInputs[a.settingsFocus], cmd = a.settingsInputs[a.settingsFocus].Update(msg)
 		return a, cmd
 	}
+}
+
+func (a *App) keepSettingsFocusVisible() {
+	if a.width >= 62 {
+		a.scrollOffset = 0
+		return
+	}
+	focusLine := 3 + a.settingsFocus*3
+	if a.settingsFocus > 2 {
+		focusLine++
+	}
+	a.scrollOffset = max(0, focusLine-max(2, a.height-5))
 }
 
 func (a *App) handleSetDirKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1633,6 +1690,7 @@ func (a *App) runSync(fileID, syncType string, isAuto bool) tea.Cmd {
 	}
 	if !isAuto {
 		a.state = viewSyncResult
+		a.scrollOffset = 0
 	}
 	return func() tea.Msg { return syncStepMsg{} }
 }
